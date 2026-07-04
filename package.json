@@ -1,0 +1,14 @@
+{
+  "name": "tennisworld-api",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "kv:create": "wrangler kv:namespace create TENNIS_CACHE"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9",
+    "wrangler": "^3.0.0"
+  }
+}

@@ -1,0 +1,7 @@
+# Copy this file to .dev.vars (never commit .dev.vars)
+# Used by wrangler dev for local secrets
+
+TENNIS_API_KEY=your-api-tennis-com-key-here
+
+# Set to "true" to run the full site without an API key (uses mock data)
+DEMO_MODE=false

@@ -1,0 +1,41 @@
+name = "tennisworld-api"
+main = "src/index.js"
+compatibility_date = "2026-05-03"
+compatibility_flags = ["nodejs_compat"]
+
+# ── Static Assets ──────────────────────────────────────────────────────────────
+# Serves the frontend through the same Worker in production.
+# wrangler dev will serve frontend/ at / and API at /api/*.
+[assets]
+directory = "../TennisWorldUI"
+binding   = "ASSETS"
+
+# ── KV Cache ───────────────────────────────────────────────────────────────────
+# Create with: npx wrangler kv namespace create TENNIS_CACHE
+# Then set the id below.
+[[kv_namespaces]]
+binding = "TENNIS_CACHE"
+id      = "71f4016e2aa14b9c8bba916d05086fe1"
+
+# ── Secrets ────────────────────────────────────────────────────────────────────
+# Never commit real values. Set with:
+#   npx wrangler secret put TENNIS_API_KEY
+# For local dev, add to api/.dev.vars (git-ignored):
+#   TENNIS_API_KEY=your-key-here
+
+# ── Vars (non-sensitive config) ────────────────────────────────────────────────
+# ADMIN_SECRET is a secret, not a var: set with `npx wrangler secret put ADMIN_SECRET`
+# (local dev value lives in .dev.vars). Admin routes fail closed when it is unset.
+[vars]
+CORS_ORIGIN  = "https://tennisworld-api.nicomontoya.workers.dev"  # prod origin; dev overridden via .dev.vars + localhost reflection
+DEMO_MODE    = "false"                   # Set to "true" to serve mock data (no API key needed)
+
+# ── Scheduled cron triggers ────────────────────────────────────────────────────
+# Rankings + calendar: refresh every 6 hours (data doesn't change often)
+# Livescores: not here — live.js polls directly on the client side
+[[triggers.crons]]
+cron = "0 */6 * * *"   # Every 6 hours: refresh rankings & calendar KV cache
+
+# NOTE: deploys are top-level (`npx wrangler deploy`, no --env flag). The old
+# [env.production] block never applied to actual deploys (they used top-level
+# vars) and was removed as a misleading second source of truth.
