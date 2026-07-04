@@ -21,6 +21,43 @@ function parseScore(result) {
     return result.trim().split(/\s+/);
 }
 
+// ── Phantom-fixture filter ────────────────────────────────────────────────────
+// The upstream feed sometimes leaves stale speculative fixtures in a round
+// (e.g. an unplayed "R32: Tiafoe vs Bublik" long after the real R32 finished
+// with different pairings). They inflate a 16-slot round to 18 matches, which
+// misaligns every downstream slot computation (DrawBracket, picks, scoring)
+// and renders ghost "pickable" cards. Rule — an UNSTARTED fixture is phantom if:
+//   (a) either player was already eliminated in an earlier round, or
+//   (b) either player already appears in a completed match of the SAME round.
+// Completed and live matches are always kept. Rounds iterate earliest→latest
+// (order: 7 = R128 … 1 = Final) so elimination knowledge accumulates forward.
+function stripPhantomFixtures(rounds) {
+    const eliminated = new Set();
+    const isReal = k => k != null && k !== '' && k !== 'null' && k !== 'undefined';
+
+    const earliestFirst = rounds.slice().sort((a, b) => b.order - a.order);
+    for (const round of earliestFirst) {
+        const completedPlayers = new Set();
+        for (const m of round.matches) {
+            if (!m.winner) continue;
+            if (isReal(m.player1Key)) completedPlayers.add(String(m.player1Key));
+            if (isReal(m.player2Key)) completedPlayers.add(String(m.player2Key));
+        }
+        round.matches = round.matches.filter(m => {
+            if (m.winner || m.isLive) return true;
+            const p1 = String(m.player1Key), p2 = String(m.player2Key);
+            if ((isReal(p1) && eliminated.has(p1)) || (isReal(p2) && eliminated.has(p2))) return false;
+            if ((isReal(p1) && completedPlayers.has(p1)) || (isReal(p2) && completedPlayers.has(p2))) return false;
+            return true;
+        });
+        for (const m of round.matches) {
+            if (m.winner === 'player1' && isReal(m.player2Key)) eliminated.add(String(m.player2Key));
+            if (m.winner === 'player2' && isReal(m.player1Key)) eliminated.add(String(m.player1Key));
+        }
+    }
+    return rounds.filter(r => r.matches.length > 0);
+}
+
 // GET /api/draws?tournamentKey=XXXX&season=YYYY
 // tournamentKey is the new RapidAPI tournament id.
 // season is ignored (new API returns full history per tournament id).
@@ -31,7 +68,7 @@ export async function handleDraws(request, env) {
 
     const tour = (searchParams.get('tour') || 'ATP').toUpperCase();
 
-    const cacheKey = ['draws3', tournamentKey, tour];
+    const cacheKey = ['draws4', tournamentKey, tour];
     const cached   = await cache.get(env, ...cacheKey);
     if (cached) return cached.data;
 
@@ -124,9 +161,11 @@ export async function handleDraws(request, env) {
         roundMap[ri].matches.push(f);
     }
 
-    const rounds = Object.values(roundMap)
-        .sort((a, b) => a.order - b.order)
-        .filter(r => r.matches.length > 0);
+    const rounds = stripPhantomFixtures(
+        Object.values(roundMap)
+            .sort((a, b) => a.order - b.order)
+            .filter(r => r.matches.length > 0)
+    );
 
     const result = {
         tournamentKey,

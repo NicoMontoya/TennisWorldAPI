@@ -19,6 +19,19 @@ One Cloudflare Worker (`tennisworld-api`) serves everything:
 The frontend picks its API base automatically: same-origin in production, `localhost:8787`
 when a local static server (any port other than 8787) is used during development.
 
+### User brackets & leaderboard
+
+Signed-in fans save one bracket per tournament (`POST /api/bracket/save`); guests keep
+localStorage brackets. Endpoints: `/api/bracket/mine` (auth), `/api/bracket/leaders`,
+`/api/bracket/public?id=` (both public — expose display name + random publicId, never
+emails). Scoring is round-weighted (first delivered round = 1 pt, doubling each round,
+so every round is worth the same total on a full draw); `maxPossible` drops picks whose
+player has been eliminated. Anti point-farming: picks on already-decided matches are
+locked to their previously-saved value at save time. Leaderboards recompute lazily with
+a 5-minute KV cache (`_lb:*`) — no cron needed. Picks saved on projected rounds use
+positional `__inf_{col}_{slot}` keys that keep scoring after the round materializes
+(same fallback lives in `TennisWorldUI/components/BracketPicks.js` — keep in sync).
+
 ## Local development
 
 ```bash

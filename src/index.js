@@ -21,6 +21,7 @@ import { handleBackfillRankings, handleClearRankHistory, handleImportRankHistory
 import { handleRegister, handleLogin, handleLogout, handleMe, handleUpdateProfile, handleChangePassword } from './routes/auth.js';
 import { handleFavorites, handleFavoritesToggle }              from './routes/favorites.js';
 import { handlePredict }      from './routes/predict.js';
+import { handleBracketSave, handleBracketMine, handleBracketLeaders, handleBracketPublic } from './routes/userBrackets.js';
 
 // ── Route table (GET) ─────────────────────────────────────────────────────────
 const GET_ROUTES = {
@@ -42,6 +43,9 @@ const GET_ROUTES = {
     '/api/admin/clear-rank-history':    handleClearRankHistory,
     '/api/auth/me':           handleMe,
     '/api/favorites':         handleFavorites,
+    '/api/bracket/mine':      handleBracketMine,
+    '/api/bracket/leaders':   handleBracketLeaders,
+    '/api/bracket/public':    handleBracketPublic,
 };
 
 // ── Route table (POST) ────────────────────────────────────────────────────────
@@ -52,6 +56,7 @@ const POST_ROUTES = {
     '/api/auth/update-profile':   handleUpdateProfile,
     '/api/auth/change-password':  handleChangePassword,
     '/api/favorites/toggle':          handleFavoritesToggle,
+    '/api/bracket/save':              handleBracketSave,
     '/api/admin/import-rank-history': handleImportRankHistory,
 };
 
