@@ -83,3 +83,14 @@ describe('positionalKeyMap (decided-slot lock support)', () => {
         expect(map.get('__inf_1_0')).toBe('100');
     });
 });
+
+describe('retro picks (hindsight never scores)', () => {
+    it('excludes retro-flagged picks from score and maxPossible', () => {
+        const rounds = draw({ sfDecided: true, finalDelivered: true, finalDecided: true });
+        // Both picks match actual winners, but '10' was made with hindsight.
+        const r = computeBracketScore(rounds, { '10': 'A', '100': 'A' }, { '10': true });
+        expect(r.score).toBe(2);        // only the final (weight 2) counts
+        expect(r.totalPicks).toBe(2);   // still displayed as a pick
+        expect(r.decided).toBe(1);      // retro excluded from accuracy base
+    });
+});

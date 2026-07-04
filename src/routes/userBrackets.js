@@ -101,14 +101,24 @@ export async function handleBracketSave(request, env) {
     const posMap = positionalKeyMap(rounds);
     const norm = k => posMap.get(k) || k;
 
-    // Anti point-farming: decided matches keep the prior pick (or none).
+    // Anti point-farming: a pick on an already-decided match keeps its prior
+    // value when one exists; a NEW pick on a decided match is stored (so the
+    // from-scratch canvas survives reload/compare) but flagged retro — it can
+    // never earn points. Retro flags stick for the bracket's lifetime.
     const cleanPicks = {};
+    const retroFlags = {};
+    const priorRetro = (prior && prior.retro) || {};
     for (const [k, v] of entries) {
         const nk = norm(k);
         if (decided.has(nk)) {
             const prev = prior && prior.picks && (prior.picks[nk] || prior.picks[k]);
-            if (prev) cleanPicks[nk] = String(prev);
-            // else: ignore — you can't pick a match that's already decided
+            if (prev) {
+                cleanPicks[nk] = String(prev);
+                if (priorRetro[nk] || priorRetro[k]) retroFlags[nk] = true;
+            } else {
+                cleanPicks[nk] = String(v);
+                retroFlags[nk] = true; // created with hindsight — display-only
+            }
         } else if (cleanPicks[nk] === undefined) {
             cleanPicks[nk] = String(v);
         }
@@ -117,7 +127,10 @@ export async function handleBracketSave(request, env) {
     if (prior && prior.picks) {
         for (const [k, v] of Object.entries(prior.picks)) {
             const nk = norm(k);
-            if (decided.has(nk) && cleanPicks[nk] === undefined) cleanPicks[nk] = String(v);
+            if (decided.has(nk) && cleanPicks[nk] === undefined) {
+                cleanPicks[nk] = String(v);
+                if (priorRetro[nk] || priorRetro[k]) retroFlags[nk] = true;
+            }
         }
     }
 
@@ -134,6 +147,7 @@ export async function handleBracketSave(request, env) {
         displayName: displayNameOf(user),
         tour, tournamentKey: tk, season, tournamentName,
         picks: cleanPicks,
+        retro: retroFlags,
         updatedAt: new Date().toISOString(),
     };
     await env.TENNIS_CACHE.put(key, JSON.stringify(record));
@@ -151,8 +165,9 @@ export async function handleBracketSave(request, env) {
     // Invalidate the leaderboard cache so the save shows up promptly.
     await env.TENNIS_CACHE.delete(kLeaders(tour, tk));
 
-    const scored = computeBracketScore(rounds, cleanPicks);
-    return { saved: true, picksSaved: Object.keys(cleanPicks).length, ...scored };
+    const scored = computeBracketScore(rounds, cleanPicks, retroFlags);
+    return { saved: true, picksSaved: Object.keys(cleanPicks).length,
+             retroCount: Object.keys(retroFlags).length, ...scored };
 }
 
 // ── GET /api/bracket/mine ─────────────────────────────────────────────────────
@@ -169,7 +184,7 @@ export async function handleBracketMine(request, env) {
         const rec = await env.TENNIS_CACHE.get(kBracket(tour, tk, user.email), 'json');
         if (!rec) return { bracket: null };
         let scored = null;
-        try { scored = computeBracketScore(await fetchRounds(env, tour, tk), rec.picks); } catch (_) {}
+        try { scored = computeBracketScore(await fetchRounds(env, tour, tk), rec.picks, rec.retro); } catch (_) {}
         return { bracket: { ...rec, userId: undefined, ...(scored || {}) } };
     }
 
@@ -179,7 +194,7 @@ export async function handleBracketMine(request, env) {
         const rec = await env.TENNIS_CACHE.get(kBracket(meta.tour, meta.tournamentKey, user.email), 'json');
         if (!rec) continue;
         let scored = null;
-        try { scored = computeBracketScore(await fetchRounds(env, meta.tour, meta.tournamentKey), rec.picks); } catch (_) {}
+        try { scored = computeBracketScore(await fetchRounds(env, meta.tour, meta.tournamentKey), rec.picks, rec.retro); } catch (_) {}
         out.push({
             tour: meta.tour, tournamentKey: meta.tournamentKey, season: meta.season,
             tournamentName: meta.tournamentName, updatedAt: rec.updatedAt,
@@ -219,7 +234,7 @@ export async function handleBracketLeaders(request, env) {
     for (const keyName of keys.slice(0, 500)) {
         const rec = await env.TENNIS_CACHE.get(keyName, 'json');
         if (!rec) continue;
-        const scored = computeBracketScore(rounds, rec.picks);
+        const scored = computeBracketScore(rounds, rec.picks, rec.retro);
         entries.push({
             publicId: rec.publicId,
             displayName: rec.displayName,
@@ -256,7 +271,7 @@ export async function handleBracketPublic(request, env) {
     if (!rec) bad('bracket not found', 404);
 
     let scored = null;
-    try { scored = computeBracketScore(await fetchRounds(env, tour, tk), rec.picks); } catch (_) {}
+    try { scored = computeBracketScore(await fetchRounds(env, tour, tk), rec.picks, rec.retro); } catch (_) {}
     return {
         displayName: rec.displayName,
         publicId: rec.publicId,

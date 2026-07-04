@@ -32,6 +32,12 @@ a 5-minute KV cache (`_lb:*`) — no cron needed. Picks saved on projected round
 positional `__inf_{col}_{slot}` keys that keep scoring after the round materializes
 (same fallback lives in `TennisWorldUI/components/BracketPicks.js` — keep in sync).
 
+The pick UI is a **from-scratch canvas**: first-round pairings only, the fan predicts
+every match themselves; real results grade picks (green/red) but never pre-fill them.
+Picks first created on already-decided matches are stored with a `retro` flag —
+displayed and comparable, but permanently excluded from scoring (late entrants can
+complete their bracket without earning hindsight points).
+
 ## Local development
 
 ```bash

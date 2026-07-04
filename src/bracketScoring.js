@@ -56,11 +56,17 @@ function bucketRounds(rounds) {
 }
 
 /**
- * computeBracketScore(rounds, picks) →
+ * computeBracketScore(rounds, picks, retro) →
  *   { score, maxPossible, correct, decided, totalPicks, accuracy }
+ *
+ * retro: { [pickKey]: true } — picks first created AFTER their match was
+ * already decided (late entrants filling the canvas). Stored for display and
+ * compare, but excluded from score/maxPossible/decided/accuracy so hindsight
+ * can never earn points.
  */
-export function computeBracketScore(rounds, picks) {
+export function computeBracketScore(rounds, picks, retro) {
     picks = picks || {};
+    retro = retro || {};
     const { byRound, roundIds } = bucketRounds(rounds);
     const empty = { score: 0, maxPossible: 0, correct: 0, decided: 0, totalPicks: 0, accuracy: null };
     if (!roundIds.length) return empty;
@@ -88,11 +94,13 @@ export function computeBracketScore(rounds, picks) {
         seenCols.add(ci);
         const w = Math.pow(2, ci);
         byRound[rid].forEach((m, si) => {
-            let pick = picks[String(m.matchKey)];
-            if (!isRealKey(pick)) pick = picks['__inf_' + ci + '_' + si];
+            let usedKey = String(m.matchKey);
+            let pick = picks[usedKey];
+            if (!isRealKey(pick)) { usedKey = '__inf_' + ci + '_' + si; pick = picks[usedKey]; }
             if (!isRealKey(pick)) return;
             pick = String(pick);
             totalPicks++;
+            if (retro[usedKey]) return; // display-only — hindsight never scores
             const actual = winnerKeyOf(m);
             if (actual != null) {
                 decided++;
