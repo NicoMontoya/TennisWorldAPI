@@ -50,9 +50,15 @@ npx wrangler secret put ADMIN_SECRET            # protects /api/admin/* (they 40
 Every deploy:
 
 ```bash
+npx wrangler secret list        # confirm TENNIS_API_KEY (+ ADMIN_SECRET) exist in prod
 npx wrangler deploy --dry-run   # sanity check bundle + config
 npx wrangler deploy
+npx wrangler tail               # live prod logs — keep open during launch-day smoke test
 ```
+
+Note: `wrangler dev` uses a LOCAL KV simulation — dev/test writes (accounts,
+rate-limit counters) never touch the production namespace. Only `wrangler dev
+--remote` or a deployed Worker writes to the real KV.
 
 Post-deploy verification:
 
