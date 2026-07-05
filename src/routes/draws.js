@@ -1,6 +1,7 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
+import { assignSlotOrder } from '../bracketSlots.js';
 
 // roundId → { name, order } (order 1 = Final, higher = earlier round)
 const ROUND = {
@@ -68,7 +69,7 @@ export async function handleDraws(request, env) {
 
     const tour = (searchParams.get('tour') || 'ATP').toUpperCase();
 
-    const cacheKey = ['draws4', tournamentKey, tour];
+    const cacheKey = ['draws5', tournamentKey, tour];
     const cached   = await cache.get(env, ...cacheKey);
     if (cached) return cached.data;
 
@@ -161,10 +162,13 @@ export async function handleDraws(request, env) {
         roundMap[ri].matches.push(f);
     }
 
-    const rounds = stripPhantomFixtures(
-        Object.values(roundMap)
-            .sort((a, b) => a.order - b.order)
-            .filter(r => r.matches.length > 0)
+    const rounds = assignSlotOrder(
+        stripPhantomFixtures(
+            Object.values(roundMap)
+                .sort((a, b) => a.order - b.order)
+                .filter(r => r.matches.length > 0)
+        ),
+        tour, tournamentName
     );
 
     const result = {

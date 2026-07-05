@@ -94,3 +94,20 @@ describe('retro picks (hindsight never scores)', () => {
         expect(r.decided).toBe(1);      // retro excluded from accuracy base
     });
 });
+
+describe('slotIndex authority', () => {
+    it('positional keys follow slotIndex, not matchKey order', () => {
+        // matchKey order says 10 < 11, but the official bracket order (slotIndex)
+        // puts match 11 first — positional keys must follow slotIndex.
+        const rounds = [{
+            round: 'SF',
+            matches: [
+                { matchKey: '10', roundId: 10, slotIndex: 1, player1Key: 'A', player2Key: 'B', winner: null },
+                { matchKey: '11', roundId: 10, slotIndex: 0, player1Key: 'C', player2Key: 'D', winner: null },
+            ],
+        }];
+        const map = positionalKeyMap(rounds);
+        expect(map.get('__inf_0_0')).toBe('11');
+        expect(map.get('__inf_0_1')).toBe('10');
+    });
+});

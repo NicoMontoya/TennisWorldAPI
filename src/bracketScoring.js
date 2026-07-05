@@ -36,8 +36,9 @@ function loserKeyOf(m) {
     return null;
 }
 
-// Bucket rounds by roundId, sorted matchKey-ascending (mirrors DrawBracket /
-// BracketPicks slot order).
+// Bucket rounds by roundId, sorted into slot order: the server-stamped
+// `slotIndex` (official bracket order — the single slot authority shared with
+// DrawBracket/BracketPicks) with matchKey as the fallback for older data.
 function bucketRounds(rounds) {
     const byRound = {};
     for (const r of rounds || []) {
@@ -49,8 +50,9 @@ function bucketRounds(rounds) {
     }
     const roundIds = Object.keys(byRound).map(Number)
         .sort((a, b) => RID_TO_IDX[a] - RID_TO_IDX[b]);
+    const slotVal = m => (m.slotIndex != null ? m.slotIndex : Number(m.matchKey));
     for (const rid of roundIds) {
-        byRound[rid].sort((a, b) => Number(a.matchKey) - Number(b.matchKey));
+        byRound[rid].sort((a, b) => slotVal(a) - slotVal(b));
     }
     return { byRound, roundIds };
 }
