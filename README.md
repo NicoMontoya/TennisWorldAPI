@@ -90,6 +90,9 @@ curl -s -o /dev/null -w '%{http_code}\n' "$BASE/api/debug"  # expect 404 (remove
 
 Rollback: `npx wrangler rollback` (or redeploy the previous git tag).
 
+After first deploy: run `curl "$BASE/api/admin/backfill-rankings?tour=ATP&weeksBack=26&secret=…"`
+once so player-profile ranking charts have history immediately (cron keeps them fresh after).
+
 ## Free-tier quota watch items
 
 - **KV writes: 1,000/day.** Each cache fill, prediction cache, account write, and
