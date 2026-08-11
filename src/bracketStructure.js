@@ -101,4 +101,102 @@ export function relabelByDepth(rounds, drawSizeHint) {
     return leaves;
 }
 
+// Winner playerKey of a decided match, else null.
+function winnerKeyOf(m) {
+    if (m.winner === 'player1') return String(m.player1Key);
+    if (m.winner === 'player2') return String(m.player2Key);
+    return null;
+}
+function isRealKey(k) { return k != null && k !== '' && k !== 'null' && k !== 'undefined'; }
+
+/**
+ * expandByes(rounds, leaves) — for a draw with byes (Masters 96, 48, 56…), the
+ * earliest round is narrower than a full tree (a 96-draw's play-in is 32 real
+ * matches, but the bracket has 64 first-round slots — the other 32 are seeds
+ * who received byes). This rebuilds the earliest round to its FULL width by
+ * threading it from the SECOND round: each second-round player either won a
+ * play-in match (that match becomes their feeder slot) or entered on a bye (a
+ * synthetic "seed vs BYE" match, seed auto-advanced, is placed in that slot).
+ *
+ * The result: the earliest round has exactly leaves/2 slots in an order that
+ * connects correctly to the second round (slots 2j, 2j+1 feed second-round slot
+ * j). The client then derives the true draw size from the now-full first round
+ * and renders the complete tree — byes included — with no special-casing.
+ *
+ * No-op when the earliest round is already full width (128/64/32 draws) or when
+ * there is no second round to thread from. Mutates `rounds`; returns it.
+ */
+export function expandByes(rounds, leaves) {
+    if (!rounds || rounds.length < 2 || !leaves) return rounds;
+    const ordered = rounds.slice().sort((a, b) => b.order - a.order); // earliest first
+    const earliest = ordered[0];
+    const second   = ordered[1];
+    const fullWidth = leaves / 2;
+    if (!earliest.matches.length || earliest.matches.length >= fullWidth) return rounds; // no byes
+
+    // Map each play-in winner → the match they won (their feeder slot).
+    const winnerToMatch = new Map();
+    for (const m of earliest.matches) {
+        const wk = winnerKeyOf(m);
+        if (wk) winnerToMatch.set(wk, m);
+    }
+
+    const template = earliest.matches[0];
+    const rid = template.roundId;
+    const roundName = earliest.round;
+    let byeSeq = 0;
+
+    const byeMatch = (key, name, seed) => ({
+        ...template,
+        matchKey:    `bye-${rid}-${byeSeq++}`,
+        player1Name: name || '',
+        player1Key:  isRealKey(key) ? String(key) : '',
+        player1Seed: seed != null ? seed : null,
+        player2Name: 'BYE',
+        player2Key:  '',
+        player2Seed: null,
+        player1Rank: null,
+        player2Rank: null,
+        winner:      isRealKey(key) ? 'player1' : null,   // seed auto-advances
+        setScores:   [],
+        status:      isRealKey(key) ? 'Finished' : 'Not Started',
+        isLive:      false,
+        isBye:       true,
+        synthetic:   true,
+    });
+    const tbdMatch = () => ({
+        ...template, matchKey: `bye-${rid}-${byeSeq++}`,
+        player1Name: 'TBD', player1Key: '', player1Seed: null,
+        player2Name: 'TBD', player2Key: '', player2Seed: null,
+        player1Rank: null, player2Rank: null,
+        winner: null, setScores: [], status: 'Not Started', isLive: false, synthetic: true,
+    });
+
+    // Thread the earliest round from the second round's players, in slot order.
+    const feeders = [];
+    for (const sm of second.matches) {
+        for (const side of ['player1', 'player2']) {
+            const key = String(sm[`${side}Key`] ?? '');
+            const name = sm[`${side}Name`] || '';
+            const seed = sm[`${side}Seed`];
+            if (isRealKey(key) && winnerToMatch.has(key)) {
+                feeders.push(winnerToMatch.get(key));   // they won a play-in match
+            } else if (isRealKey(key)) {
+                feeders.push(byeMatch(key, name, seed)); // entered on a bye
+            } else {
+                feeders.push(tbdMatch());                // unknown feeder (data gap)
+            }
+        }
+    }
+    // Any real play-in matches not threaded above (shouldn't happen, but keep
+    // them rather than drop) + pad to full width with TBD.
+    const used = new Set(feeders);
+    for (const m of earliest.matches) if (!used.has(m)) feeders.push(m);
+    while (feeders.length < fullWidth) feeders.push(tbdMatch());
+
+    for (const m of feeders) { m.round = roundName; m.roundId = rid; }
+    earliest.matches = feeders.slice(0, fullWidth);
+    return rounds;
+}
+
 export { DEPTH, nextPow2 };

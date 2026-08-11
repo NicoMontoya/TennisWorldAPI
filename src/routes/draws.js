@@ -69,7 +69,7 @@ export async function handleDraws(request, env) {
 
     const tour = (searchParams.get('tour') || 'ATP').toUpperCase();
 
-    const cacheKey = ['draws11', tournamentKey, tour];
+    const cacheKey = ['draws12', tournamentKey, tour];
     const cached   = await cache.get(env, ...cacheKey);
     if (cached) return cached.data;
 
