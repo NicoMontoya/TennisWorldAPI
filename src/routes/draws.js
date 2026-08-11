@@ -69,7 +69,7 @@ export async function handleDraws(request, env) {
 
     const tour = (searchParams.get('tour') || 'ATP').toUpperCase();
 
-    const cacheKey = ['draws5', tournamentKey, tour];
+    const cacheKey = ['draws11', tournamentKey, tour];
     const cached   = await cache.get(env, ...cacheKey);
     if (cached) return cached.data;
 
@@ -178,11 +178,23 @@ export async function handleDraws(request, env) {
         rounds,
     };
 
-    // Draw refreshes once a day (per preference — real-time freshness isn't needed).
-    // Upstream is hit at most once per 24h per tournament; the bracket reflects new
-    // results within a day of them happening. NOTE: the 24h window means a draw
-    // first cached BEFORE results existed can stay stale up to a day — acceptable
-    // by design here.
-    await cache.set(env, TTL.fixtures, result, ...cacheKey);
+    // ── Adaptive cache TTL ────────────────────────────────────────────────────
+    // A fixed 24h TTL made LIVE draws stale — new results could take a day to
+    // show. Key the TTL to tournament state so an in-progress draw refreshes fast
+    // while a finished/not-started one still caches long. Synthetic (placeholder)
+    // matches don't count as real play.
+    const allMatches = rounds.flatMap(r => r.matches);
+    const anyLive    = allMatches.some(m => m.isLive);
+    const anyDecided = allMatches.some(m => m.winner && !m.synthetic);
+    const finalDone  = rounds.some(r => /final/i.test(r.round)
+                                     && r.matches.some(m => m.winner));
+
+    let ttl;
+    if (anyLive)                 ttl = TTL.livescore;   //   5 min — matches in play now
+    else if (anyDecided && !finalDone) ttl = 10 * 60;  //  10 min — tournament in progress
+    else if (!anyDecided)        ttl = 60 * 60;         //   1 hr  — not started (draw/qualifiers settling)
+    else                         ttl = TTL.fixtures;    //  24 hr  — completed, nothing left to change
+
+    await cache.set(env, ttl, result, ...cacheKey);
     return result;
 }
