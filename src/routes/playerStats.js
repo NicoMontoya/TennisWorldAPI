@@ -26,8 +26,10 @@ function normSurface(court) {
 }
 
 // Reuses the same cache key as h2h.js so both routes share one warm cache entry.
+// v6: bumped after fixing calendar() pagination (was truncating to ~201 of
+// ~900 tournaments/year, dropping most Slams/Masters from the map).
 async function getTournamentMap(env, tour) {
-    const ckey = ['tournament-map-v5', tour];
+    const ckey = ['tournament-map-v6', tour];
     const cached = await cache.get(env, ...ckey);
     if (cached) return cached.data;
 

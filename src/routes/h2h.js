@@ -38,8 +38,10 @@ function normSurface(court) {
 // ── Tournament calendar (ID → {name, surface}) ─────────────────────────────────
 // Fetches current + previous year so recent H2H history has names.
 
+// v6: bumped after fixing calendar() pagination (was truncating to ~201 of
+// ~900 tournaments/year, dropping most Slams/Masters from the map).
 async function getTournamentMap(env, tour) {
-    const ckey = ['tournament-map-v5', tour];
+    const ckey = ['tournament-map-v6', tour];
     const cached = await cache.get(env, ...ckey);
     if (cached) return cached.data;
 

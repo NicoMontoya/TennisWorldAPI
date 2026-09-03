@@ -46,14 +46,23 @@ const SLAM_TIER    = 4;   // Grand Slam
 // is cached independently (immutable history) so it is shared across every player.
 async function getTierMap(env, tour, years) {
     const map = {};
-    await Promise.all(years.map(async (year) => {
-        const ckey   = ['tier-map-v1', tour, String(year)];
+    // Sequential, not Promise.all: calendar() now pages ~5 requests/year (was 1,
+    // pre-pagination-fix), so firing every year concurrently for a long career
+    // (Djokovic: 23 years) bursts 100+ near-simultaneous RapidAPI requests,
+    // exhausts rapidFetch's 429 retry budget, and the per-year catch below
+    // silently empties the whole tier map — titles/masters/slams all read 0.
+    // Each year is cached 30d, so the one-time sequential cold-fill cost is
+    // paid once system-wide, not per player/request.
+    for (const year of years) {
+        // v2: bumped after fixing calendar() pagination (was truncating to ~201
+        // of ~900 tournaments/year, dropping most Slams/Masters from the map).
+        const ckey   = ['tier-map-v2', tour, String(year)];
         const cached = await cache.get(env, ...ckey);
-        if (cached) { Object.assign(map, cached.data); return; }
+        if (cached) { Object.assign(map, cached.data); continue; }
 
         let cal;
         try { cal = await rapidAPI.calendar(env, tour, year); }
-        catch { return; }   // one bad year must not sink the whole curve
+        catch { continue; }   // one bad year must not sink the whole curve
 
         const yearMap = {};
         for (const t of (cal?.data || [])) {
@@ -61,7 +70,7 @@ async function getTierMap(env, tour, years) {
         }
         await cache.set(env, TTL_TIERMAP, yearMap, ...ckey);
         Object.assign(map, yearMap);
-    }));
+    }
     return map;
 }
 
@@ -152,7 +161,13 @@ export async function handlePlayerVintage(request, env) {
         return { player: { id: playerKey, name: null }, points: [], totals: { wins: 0, matches: 0 }, error: 'not-loaded' };
     }
 
-    const cacheKey = ['player-vintage-v3', tour, playerKey];
+    // v6: bumped a third time — v5's deploy still ran before the tier-map was
+    // pre-warmed (scripts/backfill-tier-map.ts), so a long-career player's
+    // first live request still hit Cloudflare's per-request subrequest
+    // ceiling mid-computation and cached partial (undercount) totals for 24h.
+    // The tier map is now fully pre-warmed 1996-2026, so this generation
+    // should be the last cache-poisoning incident from this bug.
+    const cacheKey = ['player-vintage-v6', tour, playerKey];
     const cached   = await cache.get(env, ...cacheKey);
     if (cached) return cached.data;
 

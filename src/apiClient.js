@@ -165,15 +165,60 @@ export const rapidAPI = {
     tournamentFixtures: (env, tour, tournamentId) =>
         rapidFetch(env, `/${tour.toLowerCase()}/fixtures/tournament/${tournamentId}?pageSize=200`),
 
-    // Full tournament calendar for a year — use pageSize=200 to get all at once
+    // Full tournament calendar for a year — paginated. A requested pageSize=500
+    // is accepted but silently capped upstream at ~201 rows/page (same behavior
+    // documented on rankingsPaged below), and a season has ~700-1000 events, so
+    // we page through with pageNo until an empty page. Returns the same
+    // { data: [...] } shape as a single call so callers are unchanged.
     // Each entry: { id, name, courtId, date, rankId, draw_size, tier, court, coutry }
-    calendar: (env, tour, year) =>
-        rapidFetch(env, `/${tour.toLowerCase()}/tournament/calendar/${year}?pageSize=2000`),
+    calendar: async (env, tour, year) => {
+        const all = [];
+        // NB: `hasNextPage` is unreliable (null even when more pages exist), and a
+        // "short page" is NOT a reliable end-of-data signal — every page comes
+        // back at the ~201 cap regardless of the requested pageSize, so a
+        // `page.length < 500` check broke after page 1 every time, silently
+        // truncating each year to ~201 of ~900 tournaments (losing most Grand
+        // Slams/Masters — the events title-tier detection depends on). Terminate
+        // on a genuinely empty page instead. Pages aren't date-ordered; callers
+        // filter as needed.
+        for (let pageNo = 1; pageNo <= 8; pageNo++) {
+            const json = await rapidFetch(env, `/${tour.toLowerCase()}/tournament/calendar/${year}?pageSize=500&pageNo=${pageNo}`);
+            const page = json?.data || [];
+            if (!page.length) break;
+            all.push(...page);
+            // A full year now takes ~5 pages (was 1 before the pagination fix
+            // above) — space them out so a caller fetching many years at once
+            // (getTierMap) doesn't burst RapidAPI's rate limit across pages.
+            if (pageNo < 8) await sleep(150);
+        }
+        return { data: all };
+    },
 
     // Singles rankings: { data: [{position, point, player: {id, name, currentRank, ...}}] }
     // pageSize=100 for enrichment lookups; pass 2000 to get all ranked players (multi-week).
     rankings: (env, tour, pageSize = 100) =>
         rapidFetch(env, `/${tour.toLowerCase()}/ranking/singles?pageSize=${pageSize}`),
+
+    // Full rankings via pageNo pagination. The endpoint caps a single page at ~201
+    // rows regardless of pageSize, so `rankings(…, 2000)` only ever returns the top
+    // ~201 — leaving live players ranked deeper (e.g. draw qualifiers) with no rank
+    // or country. This pages until an empty/short page or maxPages, deduping by
+    // position, to reach ~2000. Returns the same { data: [...] } shape as rankings().
+    rankingsPaged: async (env, tour, { pageSize = 200, maxPages = 10 } = {}) => {
+        const byPos = new Map();
+        for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
+            let json;
+            try {
+                json = await rapidFetch(env, `/${tour.toLowerCase()}/ranking/singles?pageSize=${pageSize}&pageNo=${pageNo}`);
+            } catch { break; }
+            const items = json?.data || [];
+            if (!items.length) break;
+            const before = byPos.size;
+            for (const it of items) if (it.position != null) byPos.set(it.position, it);
+            if (byPos.size === before) break; // no new positions → past the end
+        }
+        return { data: [...byPos.values()] };
+    },
 
     // Historical snapshot for a specific date. Returns the same shape as rankings().
     // filter=RankingDate:YYYY-MM-DD returns the snapshot on or before that date.
@@ -189,14 +234,21 @@ export const rapidAPI = {
         rapidFetch(env, `/${tour.toLowerCase()}/h2h/info/${p1Id}/${p2Id}`),
 
     // Last N completed matches for a player, most recent first
-    // { data: [{id, date, match_winner, result, player1Id, player2Id, ...}] }
-    playerPastMatches: (env, tour, playerId, pageSize = 30) =>
-        rapidFetch(env, `/${tour.toLowerCase()}/player/past-matches/${playerId}?pageSize=${pageSize}`),
+    // { data: [{id, date, match_winner, result, player1Id, player2Id, ...}], hasNextPage }
+    // pageNo drives pagination (the `page` param is silently ignored upstream).
+    // Defaults to 1 so existing 3/4-arg callers keep getting the first page unchanged.
+    playerPastMatches: (env, tour, playerId, pageSize = 30, pageNo = 1) =>
+        rapidFetch(env, `/${tour.toLowerCase()}/player/past-matches/${playerId}?pageSize=${pageSize}&pageNo=${pageNo}`),
 
     // Career titles by tier: { data: [{tourRankId, tourRank, titlesWon, titlesLost}] }
     // tourRankId >= 2 = main tour + masters + grand slams
     playerTitles: (env, tour, playerId) =>
         rapidFetch(env, `/${tour.toLowerCase()}/player/titles/${playerId}`),
+
+    // Player profile: { data: { id, name, birthday, countryAcr, currentRank, country, information } }
+    // birthday is ISO ("2001-08-16T00:00:00.000Z"); may be absent for lesser-known players.
+    playerProfile: (env, tour, playerId) =>
+        rapidFetch(env, `/${tour.toLowerCase()}/player/profile/${playerId}`),
 };
 
 // ── Public API ─────────────────────────────────────────────────────────────────
