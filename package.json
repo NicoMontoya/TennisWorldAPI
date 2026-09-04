@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "test": "vitest run",
     "kv:create": "wrangler kv:namespace create TENNIS_CACHE"
   },
   "devDependencies": {
