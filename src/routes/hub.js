@@ -1,5 +1,6 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
+import { parseTour, rateLimit } from '../security.js';
 
 // roundId → display name
 const ROUND_NAME = {
@@ -46,9 +47,12 @@ function parseScore(result) {
 }
 
 // GET /api/hub?tour=ATP|WTA
+// Rate limit is on top of the existing 5-minute cache TTL (not a replacement).
 export async function handleHub(request, env) {
+    await rateLimit(env, request, 'hub');
+
     const { searchParams } = new URL(request.url);
-    const tour = (searchParams.get('tour') || 'ATP').toUpperCase();
+    const tour = parseTour(searchParams.get('tour'));
 
     const cacheKey = ['hub3', tour];
     const cached = await cache.get(env, ...cacheKey);
