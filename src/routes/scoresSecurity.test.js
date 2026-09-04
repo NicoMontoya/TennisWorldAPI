@@ -4,6 +4,7 @@ import { handleHub } from './hub.js';
 import { handleDraws } from './draws.js';
 import { handleFixtures } from './fixtures.js';
 import { RL_PER_MINUTE } from '../security.js';
+import worker from '../index.js';
 
 function mockEnv() {
     const store = new Map();
@@ -91,5 +92,27 @@ describe('GET /api/draws + /api/fixtures tournamentKey', () => {
     it('fixtures: junk tournamentKey is 400 and does not mint a cache key', async () => {
         await expectReject(handleFixtures(get('/api/fixtures?tournamentKey=../../x'), env), 400, /digits only/i);
         expect([...env.TENNIS_CACHE._store.keys()].filter(k => k.startsWith('tw:'))).toEqual([]);
+    });
+});
+
+describe('worker JSON contract', () => {
+    it('maps hub 429 and livescore 400 through jsonResponse { ok:false, error }', async () => {
+        const env = mockEnv();
+        env.CORS_ORIGIN = '*';
+        env.TENNIS_CACHE._store.set('_rl:hub:203.0.113.4', String(RL_PER_MINUTE.max));
+
+        const limited = await worker.fetch(get('/api/hub?tour=ATP', '203.0.113.4'), env);
+        expect(limited.status).toBe(429);
+        expect(await limited.json()).toEqual({
+            ok: false,
+            error: expect.stringMatching(/too many requests/i),
+        });
+
+        const bad = await worker.fetch(get('/api/livescore?tournamentKey=not-digits'), env);
+        expect(bad.status).toBe(400);
+        expect(await bad.json()).toEqual({
+            ok: false,
+            error: expect.stringMatching(/digits only/i),
+        });
     });
 });
