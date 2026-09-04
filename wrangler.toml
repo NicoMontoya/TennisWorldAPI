@@ -33,8 +33,8 @@ DEMO_MODE    = "false"                   # Set to "true" to serve mock data (no 
 # ── Scheduled cron triggers ────────────────────────────────────────────────────
 # Rankings + calendar: refresh every 6 hours (data doesn't change often)
 # Livescores: not here — live.js polls directly on the client side
-[[triggers.crons]]
-cron = "0 */6 * * *"   # Every 6 hours: refresh rankings & calendar KV cache
+[triggers]
+crons = ["0 */6 * * *"]
 
 # NOTE: deploys are top-level (`npx wrangler deploy`, no --env flag). The old
 # [env.production] block never applied to actual deploys (they used top-level
