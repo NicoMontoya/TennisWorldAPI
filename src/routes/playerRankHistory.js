@@ -10,9 +10,11 @@ import { cache } from '../cache.js';
 //   - by the cron job for top-N players to seed history before anyone visits
 //
 // KV key: tw:rank-history:v1:{tour}:{playerKey}
-// Value : [{date: "YYYY-MM-DD", rank: N}, ...]  max 104 entries (2 years)
+// Value : [{date: "YYYY-MM-DD", rank: N}, ...]  full career (weekly from the
+//         Sackmann backfill + live daily snapshots), capped generously so a
+//         decades-long career is never truncated (2600 ≈ 50 years of weekly data).
 
-const KV_MAX_ENTRIES = 104;
+export const KV_MAX_ENTRIES = 2600;
 
 function todayISO() {
     return new Date().toISOString().split('T')[0];

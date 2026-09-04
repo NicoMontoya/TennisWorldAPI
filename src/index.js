@@ -18,7 +18,7 @@ import { handleCalendar }         from './routes/calendar.js';
 import { handlePlayerHistory }     from './routes/playerHistory.js';
 import { handleVintageRoster, handlePlayerVintage, handleImportVintage } from './routes/vintage.js';
 import { handlePlayerRankHistory, seedRankSnapshots } from './routes/playerRankHistory.js';
-import { handleBackfillRankings, handleClearRankHistory, handleImportRankHistory } from './routes/adminBackfill.js';
+import { handleBackfillRankings, handleClearRankHistory, handleImportRankHistory, handleImportMatches } from './routes/adminBackfill.js';
 import { handleRankingsHistory, handleImportRankingsHistory } from './routes/rankingsHistory.js';
 import { handleRegister, handleLogin, handleLogout, handleMe, handleUpdateProfile, handleChangePassword } from './routes/auth.js';
 import { handleFavorites, handleFavoritesToggle }              from './routes/favorites.js';
@@ -65,6 +65,7 @@ const POST_ROUTES = {
     '/api/admin/import-rank-history': handleImportRankHistory,
     '/api/admin/import-rankings-history': handleImportRankingsHistory,
     '/api/admin/import-vintage':          handleImportVintage,
+    '/api/admin/import-matches':          handleImportMatches,
 };
 
 // ── CORS headers ──────────────────────────────────────────────────────────────

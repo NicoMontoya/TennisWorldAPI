@@ -1,161 +1,158 @@
 // backfill-sackmann.ts
-// Backfills KV ranking history from Jeff Sackmann's open tennis datasets.
+// Backfills FULL-CAREER KV ranking history from Jeff Sackmann's local dataset
+// (cloned at ../tennis_atp). Reads every decade file so a player's profile chart
+// shows their true ranking arc across their whole career, not just 2 recent years.
 //
-// Sources:
-//   ATP: https://github.com/JeffSackmann/tennis_atp
-//   WTA: https://github.com/JeffSackmann/tennis_wta
+// Prereqs:
+//   - wrangler dev running on :8787
+//   - ../tennis_atp cloned (git clone https://github.com/.../tennis_atp)
+//   - ADMIN_SECRET set in .dev.vars
 //
-// Run with wrangler dev active:
-//   bun run scripts/backfill-sackmann.ts
+// Run:  bun run scripts/backfill-sackmann.ts [--tour ATP] [--dry]
+//
+// WTA note: only tennis_atp is cloned locally. To backfill WTA, clone
+// tennis_wta alongside it and this script will pick it up.
 
-const WORKER_URL   = 'http://127.0.0.1:8787';
-const ADMIN_SECRET = 'change-me-before-deploy';
-const WEEKS_BACK   = 52; // how far back to import (max 104 = 2 years)
+import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+const here    = dirname(fileURLToPath(import.meta.url));
+const repoDir = join(here, '..');                    // TennisWorldAPI
+const WORKER  = 'http://127.0.0.1:8787';
+const BATCH   = 40;                                  // players per import POST
+
+const argv    = process.argv.slice(2);
+const dryRun  = argv.includes('--dry');
+const tourArg = (() => { const i = argv.indexOf('--tour'); return i >= 0 ? argv[i + 1]?.toUpperCase() : null; })();
+
+const ADMIN_SECRET = (readFileSync(join(repoDir, '.dev.vars'), 'utf8')
+    .match(/^ADMIN_SECRET\s*=\s*"?([^"\n]+)"?/m) || [])[1];
+if (!ADMIN_SECRET) { console.error('ADMIN_SECRET not found in .dev.vars'); process.exit(1); }
+
+// ── Name normalization for Sackmann ↔ RapidAPI matching ─────────────────────────
+function norm(s: string): string {
+    return (s || '').toLowerCase()
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')  // strip accents
+        .replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
 
 function fmtDate(d: string): string {
-    // YYYYMMDD → YYYY-MM-DD
-    return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+    return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`; // YYYYMMDD → YYYY-MM-DD
 }
 
-function cutoffDate(): string {
-    const d = new Date();
-    d.setDate(d.getDate() - WEEKS_BACK * 7);
-    return d.toISOString().split('T')[0];
+// Minimal CSV split (Sackmann files are plain, no quoted commas).
+function rows(text: string): string[][] {
+    return text.trim().split('\n').slice(1).map(l => l.split(','));
 }
-
-async function fetchText(url: string): Promise<string> {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
-    return res.text();
-}
-
-function parseCSV(text: string): { header: string[]; rows: string[][] } {
-    const lines = text.trim().split('\n');
-    const header = lines[0].split(',').map(h => h.trim());
-    const rows   = lines.slice(1).map(l => l.split(','));
-    return { header, rows };
-}
-
-function col(header: string[], row: string[], name: string): string {
-    return row[header.indexOf(name)]?.trim() ?? '';
-}
-
-// ── Per-tour backfill ──────────────────────────────────────────────────────────
 
 async function backfill(tour: 'ATP' | 'WTA') {
     const slug = tour.toLowerCase();
-    const repo = tour === 'ATP' ? 'tennis_atp' : 'tennis_wta';
-    const base = `https://raw.githubusercontent.com/JeffSackmann/${repo}/master`;
-
-    console.log(`\n── ${tour} ─────────────────────────────────`);
-
-    // 1. Sackmann player list → id → "First Last"
-    console.log('  Fetching Sackmann player list...');
-    const { header: ph, rows: pr } = parseCSV(await fetchText(`${base}/${slug}_players.csv`));
-    const sackmannName = new Map<string, string>();
-    for (const row of pr) {
-        const id   = col(ph, row, 'player_id');
-        const name = `${col(ph, row, 'name_first')} ${col(ph, row, 'name_last')}`;
-        if (id) sackmannName.set(id, name);
-    }
-    console.log(`  Loaded ${sackmannName.size} Sackmann players`);
-
-    // 2. Our standings → "name" → playerKey (RapidAPI)
-    console.log('  Fetching current standings from Worker...');
-    const standRes = await fetch(`${WORKER_URL}/api/standings?tour=${tour}`);
-    const stand    = await standRes.json() as { ok: boolean; data: Array<{ playerKey: string; name: string }> };
-    const nameToKey = new Map<string, string>();
-    for (const p of (stand.data ?? [])) {
-        nameToKey.set(p.name.toLowerCase(), p.playerKey);
-    }
-    console.log(`  Loaded ${nameToKey.size} players from standings`);
-
-    // 3. Build Sackmann id → RapidAPI playerKey via name
-    const sackToRapid = new Map<string, string>();
-    let matched = 0, unmatched: string[] = [];
-    for (const [sid, name] of sackmannName) {
-        const key = nameToKey.get(name.toLowerCase());
-        if (key) { sackToRapid.set(sid, key); matched++; }
-        else unmatched.push(name);
-    }
-    console.log(`  Name-matched: ${matched} / ${sackmannName.size}`);
-
-    // Show any currently-ranked players we couldn't match (may be name variations)
-    const unmatchedRanked = unmatched.filter(n => nameToKey.has(n.toLowerCase()));
-    if (unmatchedRanked.length) console.log('  Unmatched ranked players:', unmatchedRanked);
-
-    // 4. Load ranking CSVs and collect history for matched players
-    const cutoff = cutoffDate();
-    console.log(`  Cutoff date: ${cutoff} (${WEEKS_BACK} weeks back)`);
-
-    const histories: Record<string, Array<{ date: string; rank: number }>> = {};
-    let totalRows = 0, usedRows = 0;
-
-    for (const file of [`${slug}_rankings_20s.csv`, `${slug}_rankings_current.csv`]) {
-        console.log(`  Processing ${file}...`);
-        const { header: rh, rows } = parseCSV(await fetchText(`${base}/${file}`));
-
-        for (const row of rows) {
-            totalRows++;
-            const rawDate = col(rh, row, 'ranking_date');
-            if (!rawDate || rawDate.length < 8) continue;
-
-            const date = fmtDate(rawDate);
-            if (date < cutoff) continue;
-
-            const sid      = col(rh, row, 'player');
-            const rapidKey = sackToRapid.get(sid);
-            if (!rapidKey) continue;
-
-            const rank = parseInt(col(rh, row, 'rank'));
-            if (isNaN(rank) || rank <= 0) continue;
-
-            if (!histories[rapidKey]) histories[rapidKey] = [];
-            histories[rapidKey].push({ date, rank });
-            usedRows++;
-        }
-    }
-
-    const playerCount = Object.keys(histories).length;
-    console.log(`  CSV rows scanned: ${totalRows.toLocaleString()}, used: ${usedRows.toLocaleString()}`);
-    console.log(`  Players with history: ${playerCount}`);
-
-    if (playerCount === 0) {
-        console.log('  ⚠ No matched players found — check name mapping');
+    const dataDir = join(repoDir, '..', tour === 'ATP' ? 'tennis_atp' : 'tennis_wta');
+    if (!existsSync(dataDir)) {
+        console.log(`\n── ${tour}: skipped — ${dataDir} not cloned`);
         return;
     }
+    console.log(`\n── ${tour} ───────────────────────────────── (${dataDir})`);
 
-    // 5. Deduplicate entries per player (keep most recent rank per date)
+    // 1. Sackmann players: id → normalized "First Last". Track name collisions so
+    //    we don't map an ambiguous name to the wrong career.
+    const players = readFileSync(join(dataDir, `${slug}_players.csv`), 'utf8');
+    const ph = players.trim().split('\n')[0].split(',');
+    const iId = ph.indexOf('player_id'), iF = ph.indexOf('name_first'), iL = ph.indexOf('name_last');
+    const sidToName = new Map<string, string>();
+    const nameToSids = new Map<string, string[]>();
+    for (const r of rows(players)) {
+        const sid = r[iId]?.trim();
+        if (!sid) continue;
+        const nm = norm(`${r[iF] || ''} ${r[iL] || ''}`);
+        sidToName.set(sid, nm);
+        if (!nameToSids.has(nm)) nameToSids.set(nm, []);
+        nameToSids.get(nm)!.push(sid);
+    }
+    console.log(`  Sackmann players: ${sidToName.size}`);
+
+    // 2. Our ranked roster from the Worker: normalized name → playerKey (RapidAPI).
+    const stand = await (await fetch(`${WORKER}/api/standings?tour=${tour}`)).json() as
+        { ok: boolean; data: Array<{ playerKey: string; name: string }> };
+    const nameToKey = new Map<string, string>();
+    for (const p of (stand.data ?? [])) nameToKey.set(norm(p.name), p.playerKey);
+    console.log(`  Roster (standings): ${nameToKey.size}`);
+
+    // 3. Map the Sackmann ids we actually need → our playerKey (skip ambiguous names).
+    const sidToKey = new Map<string, string>();
+    let ambiguous = 0;
+    for (const [nm, key] of nameToKey) {
+        const sids = nameToSids.get(nm);
+        if (!sids) continue;
+        if (sids.length > 1) { ambiguous++; continue; }  // name collision — can't disambiguate w/o dob
+        sidToKey.set(sids[0], key);
+    }
+    console.log(`  Matched roster→Sackmann: ${sidToKey.size}` + (ambiguous ? `  (${ambiguous} skipped as ambiguous)` : ''));
+
+    // 4. Walk every ranking decade file; collect full career per matched player.
+    const decades = ['70s', '80s', '90s', '00s', '10s', '20s', 'current'];
+    const histories: Record<string, Array<{ date: string; rank: number }>> = {};
+    let scanned = 0, used = 0;
+    for (const dec of decades) {
+        const file = join(dataDir, `${slug}_rankings_${dec}.csv`);
+        if (!existsSync(file)) continue;
+        const text = readFileSync(file, 'utf8');
+        const rh = text.trim().split('\n')[0].split(',');
+        const iDate = rh.indexOf('ranking_date'), iRank = rh.indexOf('rank'), iPlayer = rh.indexOf('player');
+        for (const r of rows(text)) {
+            scanned++;
+            const key = sidToKey.get(r[iPlayer]?.trim());
+            if (!key) continue;
+            const rawDate = r[iDate]?.trim();
+            const rank = parseInt(r[iRank]);
+            if (!rawDate || rawDate.length < 8 || !(rank > 0)) continue;
+            (histories[key] = histories[key] || []).push({ date: fmtDate(rawDate), rank });
+            used++;
+        }
+        console.log(`  ${dec}: scanned ${scanned.toLocaleString()}, kept ${used.toLocaleString()}`);
+    }
+
+    // 5. Dedup per date (best rank), sort ascending.
     for (const key of Object.keys(histories)) {
         const byDate = new Map<string, number>();
         for (const { date, rank } of histories[key]) {
             if (!byDate.has(date) || rank < byDate.get(date)!) byDate.set(date, rank);
         }
-        histories[key] = Array.from(byDate.entries())
-            .map(([date, rank]) => ({ date, rank }))
+        histories[key] = Array.from(byDate, ([date, rank]) => ({ date, rank }))
             .sort((a, b) => a.date.localeCompare(b.date));
     }
 
-    // 6. POST to Worker import endpoint
-    console.log(`  Posting to Worker...`);
-    const importRes = await fetch(`${WORKER_URL}/api/admin/import-rank-history`, {
-        method:  'POST',
-        headers: {
-            'Content-Type':    'application/json',
-            'x-admin-secret':  ADMIN_SECRET,
-        },
-        body: JSON.stringify({ tour, histories }),
-    });
+    const keys = Object.keys(histories);
+    const totalPts = keys.reduce((s, k) => s + histories[k].length, 0);
+    console.log(`  Players with career history: ${keys.length}  (${totalPts.toLocaleString()} points total)`);
+    if (keys.length) {
+        const deepest = keys.slice().sort((a, b) => histories[b].length - histories[a].length)[0];
+        console.log(`  Deepest: playerKey ${deepest} — ${histories[deepest].length} weeks, ${histories[deepest][0].date} → ${histories[deepest].at(-1)!.date}`);
+    }
 
-    const result = await importRes.json() as { ok: boolean; data: { written: number; errors: number } };
-    const d = result.data ?? (result as any);
-    console.log(`  ✓ Written: ${d.written}, Errors: ${d.errors}`);
+    if (dryRun) { console.log('  [dry] skipping import'); return; }
+    if (!keys.length) return;
+
+    // 6. Import in batches.
+    let written = 0, errors = 0;
+    for (let i = 0; i < keys.length; i += BATCH) {
+        const chunk = keys.slice(i, i + BATCH);
+        const body = { tour, histories: Object.fromEntries(chunk.map(k => [k, histories[k]])) };
+        const res = await fetch(`${WORKER}/api/admin/import-rank-history`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-secret': ADMIN_SECRET },
+            body: JSON.stringify(body),
+        });
+        // Worker wraps handler results as { ok, data: { written, errors } }.
+        const j = await res.json() as { ok: boolean; error?: string; data?: { written?: number; errors?: number } };
+        if (!res.ok || !j.ok) { console.error(`  batch ${i}-${i + chunk.length} failed: ${j.error || res.status}`); errors += chunk.length; continue; }
+        written += j.data?.written ?? 0; errors += j.data?.errors ?? 0;
+        process.stdout.write(`\r  imported ${Math.min(i + BATCH, keys.length)}/${keys.length}`);
+    }
+    console.log(`\n  ✓ Written: ${written}, Errors: ${errors}`);
 }
 
-// ── Main ───────────────────────────────────────────────────────────────────────
-
-await backfill('ATP');
-await backfill('WTA');
+const tours: ('ATP' | 'WTA')[] = tourArg === 'WTA' ? ['WTA'] : tourArg === 'ATP' ? ['ATP'] : ['ATP', 'WTA'];
+for (const t of tours) await backfill(t);
 console.log('\nDone.');

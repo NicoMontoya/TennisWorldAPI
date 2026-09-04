@@ -134,6 +134,25 @@ export function transformPlayer(raw) {
     };
 }
 
+// RapidAPI player/profile → our player shape. Same ID namespace as draws/fixtures/
+// rankings, so identity (name/country/rank) is correct for the keys used site-wide.
+// Raw shape: { id, name, country:{name,acronym}, countryAcr, currentRank, birthday }.
+// No year-by-year seasons here — career/surface stats come from /api/player-stats
+// (also RapidAPI), so seasons is intentionally empty (renderSurfaceBars uses stats).
+export function transformRapidProfile(raw) {
+    const r = raw?.data || raw;
+    if (!r || r.id == null) return null;
+    return {
+        playerKey:   String(r.id),
+        name:        r.name || '',
+        country:     r.country?.name || r.countryAcr || '',
+        birthdate:   r.birthday || '',
+        logoUrl:     '',
+        currentRank: r.currentRank ?? null,
+        seasons:     [],
+    };
+}
+
 function _parsePlayerSeasons(stats) {
     return stats.map(s => ({
         year:   s.season        || '',

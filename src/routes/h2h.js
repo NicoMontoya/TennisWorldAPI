@@ -1,6 +1,7 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
+import { readMatchLog } from './playerMatches.js';
 
 // GET /api/h2h?playerKeyA=47275&playerKeyB=33648&tour=ATP
 //
@@ -136,6 +137,62 @@ function transformSurface(data) {
     return out;
 }
 
+// ── KV (Sackmann-backed) match-log → H2H transform ──────────────────────────────
+// The live API only sees a player's last ~200 matches and only knows current-era
+// players, so retired opponents never surface. The KV match log (seeded from Jeff
+// Sackmann's full archive via /api/admin/import-matches) carries the COMPLETE career
+// in the same playerKey namespace ('s'+SackmannId for retired players). We read A's
+// log, keep meetings vs B, and orient each so player1 = A.
+
+const SACK_ROUND = {
+    F: 'Final', SF: 'Semifinal', QF: 'Quarterfinal',
+    R16: 'Round of 16', R32: 'Round of 32', R64: 'Round of 64', R128: 'Round of 128',
+    RR: 'Round Robin', BR: 'Bronze Medal', Q1: 'Q1', Q2: 'Q2', Q3: 'Q3', ER: 'Early Round',
+};
+const sackRound = code => SACK_ROUND[code] || code || '';
+
+// Sackmann `score` is always winner-first. Orient to the log owner (player1): if the
+// owner lost, swap games per set so p1 = owner's games. The tiebreak object carries
+// {games, tbPoints} and buildScoreStr reads it symmetrically, so it needs no swap.
+function orientSetScores(rawScore, ownerWon) {
+    const sets = parseScore(rawScore);
+    return ownerWon ? sets : sets.map(s => ({ p1: s.p2, p2: s.p1, tiebreak: s.tiebreak }));
+}
+
+function transformKVMatch(rec, playerKeyA, playerKeyB) {
+    return {
+        matchKey:       rec.matchKey || '',
+        tournamentKey:  '',                         // Sackmann tourney ids aren't in the draws namespace
+        tournamentName: rec.tournamentName || '',
+        surface:        rec.surface || null,
+        date:           rec.date || '',
+        round:          sackRound(rec.round),
+        player1Key:     String(playerKeyA),
+        player1Name:    '',                         // UI labels from its own selected-player objects
+        player2Key:     String(playerKeyB),
+        player2Name:    rec.opponentName || '',
+        winner:         rec.won ? 'First Player' : 'Second Player',
+        finalResult:    rec.score || '',
+        setScores:      orientSetScores(rec.score, rec.won),
+        status:         'Finished',
+    };
+}
+
+// Surface splits over the final merged set, from player A's perspective. p1 = A.
+function computeSplits(matches, playerKeyA) {
+    const keyA = String(playerKeyA);
+    const out  = { all: { p1wins: 0, p2wins: 0 } };
+    for (const m of matches) {
+        const surf = m.surface || 'hard';
+        if (!out[surf]) out[surf] = { p1wins: 0, p2wins: 0 };
+        const aIsP1 = m.player1Key === keyA;
+        const aWon  = aIsP1 ? m.winner === 'First Player' : m.winner === 'Second Player';
+        out[surf][aWon ? 'p1wins' : 'p2wins']++;
+        out.all[aWon ? 'p1wins' : 'p2wins']++;
+    }
+    return out;
+}
+
 // ── Route handler ──────────────────────────────────────────────────────────────
 
 export async function handleH2H(request, env) {
@@ -147,8 +204,8 @@ export async function handleH2H(request, env) {
     if (!playerKeyA || !playerKeyB) throw new Error('playerKeyA and playerKeyB are required');
 
     // Cache key preserves A→B order so p1/p2 orientation is always consistent.
-    // Querying B→A fills a separate entry with correctly flipped orientation.
-    const cacheArgs = ['h2h-v9', tour, playerKeyA, playerKeyB];
+    // v10 bumped when the KV-backed complete-history merge landed.
+    const cacheArgs = ['h2h-v10', tour, playerKeyA, playerKeyB];
 
     const cached = await cache.get(env, ...cacheArgs);
     if (cached) return cached.data;
@@ -157,34 +214,37 @@ export async function handleH2H(request, env) {
     const pIdB = Number(playerKeyB);
 
     try {
-        const [pastResult, surfaceResult, mapResult] = await Promise.allSettled([
-            rapidAPI.playerPastMatches(env, tour, playerKeyA, 200),
-            rapidAPI.h2h(env, tour, playerKeyA, playerKeyB),
-            getTournamentMap(env, tour),
+        // KV log is the complete career (incl. retired opponents); the live API tops
+        // up the in-progress season. Each source degrades independently.
+        const [kvLog, pastResult, tMap] = await Promise.all([
+            readMatchLog(env, tour, playerKeyA).catch(() => []),
+            rapidAPI.playerPastMatches(env, tour, playerKeyA, 200).catch(() => null),
+            getTournamentMap(env, tour).catch(() => ({})),
         ]);
 
-        const allMatches  = pastResult.status  === 'fulfilled' ? (pastResult.value?.data  || []) : [];
-        const surfaceData = surfaceResult.status === 'fulfilled' ? (surfaceResult.value?.data || []) : [];
-        const tMap        = mapResult.status    === 'fulfilled' ?  mapResult.value            : {};
+        // ── Complete history from KV (Sackmann-backed) ───────────────────────────
+        const kvMatches = (kvLog || [])
+            .filter(m => String(m.opponentKey) === String(playerKeyB))
+            .map(m => transformKVMatch(m, playerKeyA, playerKeyB));
 
-        // Debug: log first raw match to see field structure
-        if (allMatches.length > 0) {
-            console.log('[h2h] first raw match keys:', JSON.stringify(Object.keys(allMatches[0])));
-            console.log('[h2h] first raw match:', JSON.stringify(allMatches[0]));
-        }
+        // A's most recent stored match date — the boundary past which we trust live.
+        const cutoff = (kvLog || []).reduce((mx, m) => (m.date > mx ? m.date : mx), '');
 
-        // Filter to H2H matches only, then transform
-        const h2hMatches = allMatches
+        // ── Live API — only matches newer than the Sackmann cutoff (no overlap) ──
+        const allMatches = pastResult?.data || [];
+        const liveMatches = allMatches
             .filter(m =>
                 (m.player1Id === pIdA && m.player2Id === pIdB) ||
                 (m.player1Id === pIdB && m.player2Id === pIdA)
             )
-            .map(m => transformMatch(m, tMap));
+            .map(m => transformMatch(m, tMap || {}))
+            .filter(m => !cutoff || m.date > cutoff);
+
+        const h2hMatches = [...kvMatches, ...liveMatches];
 
         const data = {
             h2hMatches,
-            surfaceSplits: transformSurface(surfaceData),
-            _rawSample: allMatches.slice(0, 2),
+            surfaceSplits: computeSplits(h2hMatches, playerKeyA),
         };
 
         await cache.set(env, TTL.h2h, data, ...cacheArgs);

@@ -3,17 +3,21 @@ import { rapidAPI } from '../apiClient.js';
 
 // GET /api/player-stats?tour=ATP|WTA&playerKey=47275
 //
-// Returns { titles, form, wins, losses, winPct, surface } for one player.
+// Returns { titles, form, wins, losses, winPct, surface, birthday } for one player.
 // surface = { hard: {wins, losses}, clay: {wins, losses}, grass: {wins, losses} }
+// birthday comes from the player profile — the standings list omits it, so the
+// rankings page enriches its Age column from here.
 //
 // Caching:
 //   titles         → 72h  (changes only after a title win)
 //   past-matches   → 6h   (updates after each match)
 //   tournament-map → 24h  (shared cache key with h2h.js)
+//   profile        → 30d  (birthday never changes)
 
 const TTL_TITLES   = 72 * 60 * 60;
 const TTL_MATCHES  =  6 * 60 * 60;
 const TTL_CALENDAR = 24 * 60 * 60;
+const TTL_PROFILE  = 30 * 24 * 60 * 60;
 
 const MAIN_TOUR_RANK_ID = 2;
 
@@ -96,6 +100,23 @@ export async function handlePlayerStats(request, env) {
         }
     }
 
+    // ── Profile (birthday) ────────────────────────────────────────────────────
+    const profileCacheKey = ['player-profile', tour, playerKey];
+    let birthday = null;
+
+    const cachedProfile = await cache.get(env, ...profileCacheKey);
+    if (cachedProfile) {
+        birthday = cachedProfile.data;
+    } else {
+        try {
+            const raw = await rapidAPI.playerProfile(env, tour, playerKey);
+            birthday = raw?.data?.birthday || null;
+            if (birthday) await cache.set(env, TTL_PROFILE, birthday, ...profileCacheKey);
+        } catch (e) {
+            console.error(`[player-stats] profile failed for ${tour}/${playerKey}:`, e.message);
+        }
+    }
+
     // ── Tournament map for surface lookup ─────────────────────────────────────
     let tMap = {};
     try {
@@ -136,5 +157,5 @@ export async function handlePlayerStats(request, env) {
         if (won) bucket.wins++; else bucket.losses++;
     }
 
-    return { titles, form, wins, losses, winPct, surface };
+    return { titles, form, wins, losses, winPct, surface, birthday };
 }

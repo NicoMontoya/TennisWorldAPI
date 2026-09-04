@@ -13,9 +13,10 @@ export async function handleStandings(request, env) {
     if (cached) return cached.data;
 
     try {
-        // Fetch enough rows to cover all ranked players in one call.
-        // The API returns multiple weeks; filter to the most recent date.
-        const raw      = await rapidAPI.rankings(env, tour, 2000);
+        // Page the full ranking list (the endpoint caps ~201/page, so a single
+        // pageSize=2000 call silently returned only the top 201). rankingsPaged
+        // walks pageNo to ~2000 so deep live players (draw qualifiers etc.) are covered.
+        const raw      = await rapidAPI.rankingsPaged(env, tour);
         const allItems = raw?.data || [];
 
         // Find the latest ranking date present in the response

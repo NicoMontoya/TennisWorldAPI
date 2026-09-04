@@ -141,8 +141,10 @@ export async function handleDraws(request, env) {
     ];
 
     // ── Enrich with live rankings for unseeded players ────────────────────────
+    // Paged (~2000 deep): the top-100/201 list left draw qualifiers (e.g. rank 248)
+    // with no rank number; paging covers the whole draw.
     try {
-        const rankData = await rapidAPI.rankings(env, tour);
+        const rankData = await rapidAPI.rankingsPaged(env, tour);
         const rankList = rankData?.data || [];
         const rankMap  = new Map(rankList.map(r => [r.player?.id, r.position]));
         for (const f of transformed) {

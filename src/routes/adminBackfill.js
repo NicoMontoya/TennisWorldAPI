@@ -1,5 +1,6 @@
 import { rapidAPI }                              from '../apiClient.js';
-import { readHistory, writeHistory, appendSnapshot } from './playerRankHistory.js';
+import { readHistory, writeHistory, appendSnapshot, KV_MAX_ENTRIES } from './playerRankHistory.js';
+import { readMatchLog, writeMatchLog, mergeMatches } from './playerMatches.js';
 
 // GET /api/admin/backfill-rankings?tour=ATP|WTA&weeksBack=26&secret=XXX
 //
@@ -86,11 +87,49 @@ export async function handleImportRankHistory(request, env) {
     let written = 0, errors = 0;
     for (const [playerKey, snapshots] of Object.entries(histories)) {
         try {
-            let history = await readHistory(env, tour, playerKey);
+            // Merge incoming snapshots with any existing history in ONE pass
+            // (dedup by date, keep the best rank), then sort + cap once — far
+            // cheaper than appendSnapshot per entry for career-length series.
+            const existing = await readHistory(env, tour, playerKey);
+            const byDate = new Map(existing.map(e => [e.date, e.rank]));
             for (const { date, rank } of snapshots) {
-                history = appendSnapshot(history, rank, date);
+                if (!date || !(rank > 0)) continue;
+                if (!byDate.has(date) || rank < byDate.get(date)) byDate.set(date, rank);
             }
-            await writeHistory(env, tour, playerKey, history);
+            const merged = Array.from(byDate, ([date, rank]) => ({ date, rank }))
+                .sort((a, b) => a.date.localeCompare(b.date))
+                .slice(-KV_MAX_ENTRIES);
+            await writeHistory(env, tour, playerKey, merged);
+            written++;
+        } catch (e) {
+            errors++;
+        }
+    }
+
+    return { ok: true, written, errors };
+}
+
+// POST /api/admin/import-matches
+// Accepts pre-processed per-player career match logs from the local
+// backfill-h2h-matches.ts script (seeded from Jeff Sackmann's archive) so /api/h2h
+// can surface complete history including retired opponents.
+// Body: { tour: "ATP"|"WTA", logs: { [playerKey]: [MatchRec] } }
+// Auth: x-admin-secret header.
+export async function handleImportMatches(request, env) {
+    const secret = request.headers.get('x-admin-secret') || '';
+    if (!env.ADMIN_SECRET || secret !== env.ADMIN_SECRET) {
+        const err = new Error('Unauthorized'); err.status = 401; throw err;
+    }
+
+    const { tour, logs } = await request.json();
+    if (!tour || !logs) throw new Error('tour and logs are required');
+
+    let written = 0, errors = 0;
+    for (const [playerKey, matches] of Object.entries(logs)) {
+        try {
+            const existing = await readMatchLog(env, tour, playerKey);
+            const merged   = mergeMatches(existing, matches);
+            await writeMatchLog(env, tour, playerKey, merged);
             written++;
         } catch (e) {
             errors++;
