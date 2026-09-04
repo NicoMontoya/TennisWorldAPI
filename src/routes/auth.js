@@ -1,13 +1,17 @@
 // ===================================
 // TennisWorld — Auth Routes
 // ===================================
-// POST /api/auth/register  — create account
-// POST /api/auth/login     — sign in, returns session token
-// POST /api/auth/logout    — invalidate session
-// GET  /api/auth/me        — current user (requires token)
+// POST /api/auth/register          — create account
+// POST /api/auth/login             — sign in, returns session token
+// POST /api/auth/logout            — invalidate session
+// GET  /api/auth/me                — current user (requires token)
+// POST /api/auth/update-profile    — first/last name
+// POST /api/auth/change-password   — rotate password, revoke all sessions
 //
 // Storage: uses TENNIS_CACHE KV directly with _user: / _session: prefixes
 // so it never collides with the cache module's own key patterns.
+// Each user record keeps a `sessions` array of live token ids so password
+// change can delete every `_session:*` without a KV scan.
 
 const SESSION_TTL = 30 * 24 * 60 * 60; // 30 days (seconds)
 const enc = new TextEncoder();
@@ -58,6 +62,28 @@ async function rateLimit(env, request, bucket) {
         throw Object.assign(new Error('Too many attempts. Please try again in a few minutes.'), { status: 429 });
 }
 
+// ── Email / token helpers ─────────────────────────────────────────────────────
+
+// Looks like local@host.tld — both sides non-empty, no whitespace, exactly one @,
+// domain has a dot. Rejects "notanemail", "user@", "@x.com", "a@b".
+export function isValidEmail(email) {
+    if (typeof email !== 'string') return false;
+    const s = email.trim();
+    if (!s || s.length > 254) return false;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+}
+
+function requireEmail(email) {
+    if (!isValidEmail(email))
+        throw Object.assign(new Error('Invalid email address'), { status: 400 });
+    return email.trim().toLowerCase();
+}
+
+function bearerToken(request) {
+    const auth = request.headers.get('Authorization') || '';
+    return auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+}
+
 // ── KV helpers ────────────────────────────────────────────────────────────────
 
 async function getUser(env, email) {
@@ -75,6 +101,18 @@ async function getSession(env, token) {
     return s;
 }
 
+// Drop tokens whose KV entries are gone or expired so the user record stays bounded.
+async function pruneSessions(env, sessions) {
+    if (!Array.isArray(sessions) || sessions.length === 0) return [];
+    const live = [];
+    for (const token of sessions) {
+        const s = await env.TENNIS_CACHE.get(`_session:${token}`, 'json');
+        if (s && Date.now() <= s.expiresAt) live.push(token);
+        else if (s) await env.TENNIS_CACHE.delete(`_session:${token}`);
+    }
+    return live;
+}
+
 async function createSession(env, email) {
     const token = crypto.randomUUID();
     await env.TENNIS_CACHE.put(
@@ -82,14 +120,35 @@ async function createSession(env, email) {
         JSON.stringify({ email, expiresAt: Date.now() + SESSION_TTL * 1000 }),
         { expirationTtl: SESSION_TTL }
     );
+    const user = await getUser(env, email);
+    if (user) {
+        const sessions = await pruneSessions(env, user.sessions);
+        sessions.push(token);
+        user.sessions = sessions;
+        await saveUser(env, user);
+    }
     return token;
+}
+
+async function revokeAllSessions(env, user) {
+    const sessions = Array.isArray(user.sessions) ? user.sessions : [];
+    await Promise.all(sessions.map(t => env.TENNIS_CACHE.delete(`_session:${t}`)));
+    user.sessions = [];
+}
+
+async function dropSessionFromUser(env, email, token) {
+    const user = await getUser(env, email);
+    if (!user || !Array.isArray(user.sessions)) return;
+    const next = user.sessions.filter(t => t !== token);
+    if (next.length === user.sessions.length) return;
+    user.sessions = next;
+    await saveUser(env, user);
 }
 
 // ── Public: extract authed user from request ──────────────────────────────────
 
 export async function getAuthUser(request, env) {
-    const auth  = request.headers.get('Authorization') || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    const token = bearerToken(request);
     if (!token) return null;
     const session = await getSession(env, token);
     if (!session) return null;
@@ -114,10 +173,9 @@ export async function handleRegister(request, env) {
 
     if (!firstName?.trim() || !lastName?.trim() || !email?.trim() || !password)
         throw Object.assign(new Error('All fields are required'), { status: 400 });
+    const emailLow = requireEmail(email);
     if (password.length < 6)
         throw Object.assign(new Error('Password must be at least 6 characters'), { status: 400 });
-
-    const emailLow = email.toLowerCase().trim();
     if (await getUser(env, emailLow))
         throw Object.assign(new Error('An account with this email already exists'), { status: 409 });
 
@@ -129,6 +187,7 @@ export async function handleRegister(request, env) {
         passwordHash: hash,
         salt,
         favorites: [],
+        sessions:  [],
         createdAt: Date.now(),
     };
     await saveUser(env, user);
@@ -141,8 +200,9 @@ export async function handleLogin(request, env) {
     const { email, password } = await request.json();
     if (!email?.trim() || !password)
         throw Object.assign(new Error('Email and password are required'), { status: 400 });
+    const emailLow = requireEmail(email);
 
-    const user = await getUser(env, email.toLowerCase().trim());
+    const user = await getUser(env, emailLow);
     if (!user || !(await verifyPassword(password, user.passwordHash, user.salt)))
         throw Object.assign(new Error('Invalid email or password'), { status: 401 });
 
@@ -151,9 +211,12 @@ export async function handleLogin(request, env) {
 }
 
 export async function handleLogout(request, env) {
-    const auth  = request.headers.get('Authorization') || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-    if (token) await env.TENNIS_CACHE.delete(`_session:${token}`);
+    const token = bearerToken(request);
+    if (token) {
+        const session = await getSession(env, token);
+        await env.TENNIS_CACHE.delete(`_session:${token}`);
+        if (session?.email) await dropSessionFromUser(env, session.email, token);
+    }
     return { ok: true };
 }
 
@@ -188,6 +251,14 @@ export async function handleChangePassword(request, env) {
     const { hash, salt } = await hashPassword(newPassword);
     user.passwordHash = hash;
     user.salt         = salt;
+    // Re-read sessions after the slow hash so a login during PBKDF2 is still revoked.
+    const latest = await getUser(env, user.email);
+    if (Array.isArray(latest?.sessions)) user.sessions = latest.sessions;
+    // Kill every listed session, plus the Bearer used for this request (covers
+    // tokens minted before sessions were stored on the user record).
+    await revokeAllSessions(env, user);
+    const current = bearerToken(request);
+    if (current) await env.TENNIS_CACHE.delete(`_session:${current}`);
     await saveUser(env, user);
     return {};
 }
