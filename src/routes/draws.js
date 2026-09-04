@@ -2,6 +2,7 @@ import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
 import { assignSlotOrder } from '../bracketSlots.js';
+import { parseTour, parseTournamentKey } from '../security.js';
 
 // roundId → { name, order } (order 1 = Final, higher = earlier round)
 const ROUND = {
@@ -64,10 +65,8 @@ function stripPhantomFixtures(rounds) {
 // season is ignored (new API returns full history per tournament id).
 export async function handleDraws(request, env) {
     const { searchParams } = new URL(request.url);
-    const tournamentKey = searchParams.get('tournamentKey');
-    if (!tournamentKey) throw new Error('tournamentKey is required');
-
-    const tour = (searchParams.get('tour') || 'ATP').toUpperCase();
+    const tournamentKey = parseTournamentKey(searchParams.get('tournamentKey'), { required: true });
+    const tour = parseTour(searchParams.get('tour'));
 
     const cacheKey = ['draws12', tournamentKey, tour];
     const cached   = await cache.get(env, ...cacheKey);

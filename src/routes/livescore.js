@@ -2,6 +2,7 @@ import { cache }               from '../cache.js';
 import { apiTennis, rapidAPI } from '../apiClient.js';
 import { transformLivescore }  from '../transforms/index.js';
 import { TTL, EVENT_TYPES }    from '../config.js';
+import { parseTour, parseTournamentKey, rateLimit } from '../security.js';
 
 const ROUND_NAME = {
     12: 'Final',       10: 'Semi-finals',    9: 'Quarter-finals',
@@ -26,10 +27,13 @@ function isMainTour(tier) {
 }
 
 // GET /api/livescore?tour=ATP|WTA&tournamentKey=123
+// Rate limit is on top of the existing cache TTL / freshness (not a replacement).
 export async function handleLivescore(request, env) {
+    await rateLimit(env, request, 'livescore');
+
     const { searchParams } = new URL(request.url);
-    const tour          = (searchParams.get('tour') || 'ATP').toUpperCase();
-    const tournamentKey = searchParams.get('tournamentKey') || undefined;
+    const tour          = parseTour(searchParams.get('tour'));
+    const tournamentKey = parseTournamentKey(searchParams.get('tournamentKey'));
 
     const cacheKey = ['livescore2', tour, tournamentKey || 'all'];
 

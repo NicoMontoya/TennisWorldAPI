@@ -3,13 +3,14 @@ import { db }                 from '../db.js';
 import { apiTennis }          from '../apiClient.js';
 import { transformFixtures }  from '../transforms/index.js';
 import { TTL }                from '../config.js';
+import { parseTournamentKey } from '../security.js';
 
 // GET /api/fixtures?dateStart=2025-01-01&dateStop=2025-01-07&tournamentKey=123
 export async function handleFixtures(request, env) {
     const { searchParams } = new URL(request.url);
     const dateStart     = searchParams.get('dateStart')     || undefined;
     const dateStop      = searchParams.get('dateStop')      || undefined;
-    const tournamentKey = searchParams.get('tournamentKey') || undefined;
+    const tournamentKey = parseTournamentKey(searchParams.get('tournamentKey'));
 
     const cacheKey = ['fixtures', tournamentKey || 'all', dateStart || '', dateStop || ''];
 
