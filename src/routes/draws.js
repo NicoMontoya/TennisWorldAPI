@@ -191,7 +191,7 @@ export async function handleDraws(request, env) {
                                      && r.matches.some(m => m.winner));
 
     let ttl;
-    if (anyLive)                 ttl = TTL.livescore;   //   5 min — matches in play now
+    if (anyLive)                 ttl = TTL.drawsLive;   //   5 min — in-play draw; ticker uses TTL.livescore (30s)
     else if (anyDecided && !finalDone) ttl = 10 * 60;  //  10 min — tournament in progress
     else if (!anyDecided)        ttl = 60 * 60;         //   1 hr  — not started (draw/qualifiers settling)
     else                         ttl = TTL.fixtures;    //  24 hr  — completed, nothing left to change

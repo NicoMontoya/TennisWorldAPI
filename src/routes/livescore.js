@@ -27,7 +27,8 @@ function isMainTour(tier) {
 }
 
 // GET /api/livescore?tour=ATP|WTA&tournamentKey=123
-// Rate limit is on top of the existing cache TTL / freshness (not a replacement).
+// Rate limit (Cache API) is on top of cache TTL / freshness, not a replacement.
+// Live TTL is TTL.livescore (30s); idle ticker is TTL.livescoreIdle (2 min).
 export async function handleLivescore(request, env) {
     await rateLimit(env, request, 'livescore');
 
@@ -147,8 +148,16 @@ export async function handleLivescore(request, env) {
         } catch (_) { /* best-effort supplement */ }
     }
 
-    // Short cache: 60s when we have live matches, 2min otherwise
+    // Short cache: 30s when we have live matches, 2 min otherwise.
+    // skipStale: these payloads expire quickly; a second KV write for :stale
+    // burns Free-tier quota without helping freshness (Edge Cache still used).
     const hasLive = data.some(m => m.isLive);
-    await cache.set(env, hasLive ? TTL.livescore : 120, data, ...cacheKey);
+    await cache.set(
+        env,
+        hasLive ? TTL.livescore : TTL.livescoreIdle,
+        data,
+        ...cacheKey,
+        { skipStale: true },
+    );
     return data;
 }
