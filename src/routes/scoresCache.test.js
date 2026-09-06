@@ -10,6 +10,7 @@ const calendar = vi.fn();
 const tournamentResults = vi.fn();
 const tournamentFixtures = vi.fn();
 const h2h = vi.fn();
+const liveEvents = vi.fn();
 
 vi.mock('../apiClient.js', async (importOriginal) => {
     const orig = await importOriginal();
@@ -21,9 +22,27 @@ vi.mock('../apiClient.js', async (importOriginal) => {
             tournamentResults: (...args) => tournamentResults(...args),
             tournamentFixtures: (...args) => tournamentFixtures(...args),
             h2h: (...args) => h2h(...args),
+            liveEvents: (...args) => liveEvents(...args),
         },
     };
 });
+
+function seedLiveEvents() {
+    liveEvents.mockResolvedValue([{
+        id: '9990001',
+        participant1: 'C. Alcaraz',
+        participant2: 'H. Hurkacz',
+        league: 'Roland Garros',
+        score: '4-2',
+        status: 'InPlay',
+        points: '30-0',
+        tourType: 'ATP',
+        matchId: '2315-2109-3001-5',
+    }]);
+    calendar.mockResolvedValue({ data: [] });
+    tournamentFixtures.mockResolvedValue({ data: [] });
+    tournamentResults.mockResolvedValue({ data: { singles: [] } });
+}
 
 function mockEnv({ kvPutThrows = false } = {}) {
     const store = new Map();
@@ -113,6 +132,8 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         tournamentResults.mockReset();
         tournamentFixtures.mockReset();
         h2h.mockReset();
+        liveEvents.mockReset();
+        seedLiveEvents();
     });
     afterEach(() => {
         delete globalThis.caches;
@@ -128,13 +149,13 @@ describe('hub/livescore cache freshness + fail-soft', () => {
             env,
             TTL.livescore,
             expect.any(Array),
-            'livescore2',
+            'livescore3',
             'ATP',
             'all',
             { skipStale: true },
         );
         const kvKeys = [...env.TENNIS_CACHE._store.keys()];
-        expect(kvKeys).toContain('tw:livescore2:ATP:all');
+        expect(kvKeys).toContain('tw:livescore3:ATP:all');
         expect(kvKeys.some(k => k.endsWith(':stale'))).toBe(false);
         expect(kvKeys.filter(k => k.startsWith('_rl:'))).toEqual([]);
     });

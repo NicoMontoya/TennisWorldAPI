@@ -9,8 +9,9 @@
 // This lets the site run fully offline for development or demos.
 //
 // Resilience: automatic retry with exponential backoff (3 attempts by default).
-// Live endpoints (get_livescore) use a circuit breaker: if they fail repeatedly,
-// the caller gets an empty result rather than cascading errors.
+// api-tennis get_livescore still uses a circuit breaker if called, but Scores
+// live data comes from MatchStat Extend `/extend/api/events/live` (same RapidAPI
+// host/key as Core). Circuit-breaker empty-return stays for leftover api-tennis.
 //
 // Alternative data sources (swap in here when needed):
 //   SportRadar:       https://developer.sportradar.com/tennis/reference
@@ -18,6 +19,7 @@
 //   OpenLigaDB:       community-maintained, free
 
 import { getMock } from './mocks/index.js';
+import { unwrapLiveEvents } from './transforms/matchstatLive.js';
 
 const BASE         = 'https://api.api-tennis.com/tennis/';
 const MAX_RETRIES  = 3;
@@ -249,6 +251,24 @@ export const rapidAPI = {
     // birthday is ISO ("2001-08-16T00:00:00.000Z"); may be absent for lesser-known players.
     playerProfile: (env, tour, playerId) =>
         rapidFetch(env, `/${tour.toLowerCase()}/player/profile/${playerId}`),
+
+    // Extend live board — same RAPIDAPI_KEY / host as Core, different path prefix.
+    // GET /tennis/v2/extend/api/events/live
+    // Returns a list (unwrapped). Each item: { id, matchId, tourType, status, score, points, ... }
+    // `id` is the live-event namespace and must never be used as Scores matchKey.
+    liveEvents: async (env) => {
+        if (!env?.RAPIDAPI_KEY) return [];
+        const json = await rapidFetch(env, '/extend/api/events/live');
+        return unwrapLiveEvents(json);
+    },
+
+    // Optional per-event live score. eventId is the Extend live id (digits only).
+    liveScoreByEventId: async (env, eventId) => {
+        const id = String(eventId ?? '');
+        if (!/^\d{1,20}$/.test(id)) throw new Error('Invalid live event id');
+        if (!env?.RAPIDAPI_KEY) return null;
+        return rapidFetch(env, `/extend/api/event/live-score/get/${id}`);
+    },
 };
 
 // ── Public API ─────────────────────────────────────────────────────────────────
@@ -256,7 +276,8 @@ export const rapidAPI = {
 export const apiTennis = {
     standings:   (env, eventType)    => call(env, 'get_standings',   { event_type: eventType }),
     tournaments: (env, eventTypeKey) => call(env, 'get_tournaments', { event_type_key: eventTypeKey }),
-    // livescore uses circuit breaker — an outage here must not break the hub
+    // Unused by /api/livescore (MatchStat events/live). Kept so other api-tennis
+    // callers stay intact; circuit breaker still applies if something invokes it.
     livescore:   (env, opts = {})    => call(env, 'get_livescore',   opts,          { circuitBreaker: true }),
     fixtures:    (env, opts = {})    => call(env, 'get_fixtures',    opts),
     player:      (env, playerKey)    => call(env, 'get_players',     { player_key: playerKey }),

@@ -15,7 +15,7 @@ One Cloudflare Worker (`tennisworld-api`) serves everything:
 - KV (`TENNIS_CACHE`) — response cache, user accounts, sessions, favorites, auth rate-limit counters
 - Cache API (`caches.default`) — hub/livescore per-IP rate-limit counters (not KV)
 - Cron (every 6h) — warms standings + calendar caches, seeds rank snapshots
-- Upstreams: [api-tennis.com](https://api-tennis.com) (live data), RapidAPI (historical rankings backfill)
+- Upstreams: MatchStat / RapidAPI `tennis-api-atp-wta-itf` (live scores via Extend `/extend/api/events/live`, plus Core fixtures/rankings/draws). api-tennis.com remains for a few legacy routes (tournaments, surface standings) — not Scores live.
 
 The frontend picks its API base automatically: same-origin in production, `localhost:8787`
 when a local static server (any port other than 8787) is used during development.
