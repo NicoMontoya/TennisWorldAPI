@@ -30,6 +30,12 @@ describe('TTL.livescore', () => {
         expect(TTL.livescore).toBeLessThanOrEqual(60);
         expect(TTL.livescoreIdle).toBe(120);
         expect(TTL.hub).toBe(5 * 60);
+        expect(TTL.drawsLive).toBe(5 * 60);
+        expect(TTL.fixtures).toBe(24 * 60 * 60);
+        expect(TTL.standings).toBe(48 * 60 * 60);
+        expect(TTL.tournaments).toBe(48 * 60 * 60);
+        expect(TTL.players).toBe(72 * 60 * 60);
+        expect(TTL.h2h).toBe(48 * 60 * 60);
     });
 });
 

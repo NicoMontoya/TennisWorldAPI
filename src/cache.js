@@ -101,8 +101,9 @@ export const cache = {
             await env.TENNIS_CACHE.put(key, JSON.stringify(payload), {
                 expirationTtl: ttlSeconds,
             });
-        } catch (err) {
-            console.warn('[cache] KV put failed:', err?.message || err);
+        } catch {
+            // Static log only — do not dump the Error (no secrets / payload).
+            console.warn('[cache] KV put failed (quota or transient); serving uncached payload');
             return;
         }
 
@@ -114,8 +115,8 @@ export const cache = {
                 staleKey,
                 JSON.stringify({ data: value, cachedAt, stale: true }),
             );
-        } catch (err) {
-            console.warn('[cache] KV stale put failed:', err?.message || err);
+        } catch {
+            console.warn('[cache] KV stale put failed (quota or transient)');
         }
     },
 

@@ -3,6 +3,7 @@ import { TTL } from '../config.js';
 import { cache } from '../cache.js';
 import { handleLivescore } from './livescore.js';
 import { handleHub } from './hub.js';
+import { RL_PER_MINUTE, rateLimitCacheUrl } from '../security.js';
 import worker from '../index.js';
 
 const calendar = vi.fn();
@@ -135,6 +136,7 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         const kvKeys = [...env.TENNIS_CACHE._store.keys()];
         expect(kvKeys).toContain('tw:livescore2:ATP:all');
         expect(kvKeys.some(k => k.endsWith(':stale'))).toBe(false);
+        expect(kvKeys.filter(k => k.startsWith('_rl:'))).toEqual([]);
     });
 
     it('returns freshly computed livescore data when KV put quota is exhausted', async () => {
@@ -177,5 +179,29 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         const body = await res.json();
         expect(body.ok).toBe(true);
         expect(body.data.tournament.name).toBe('Test Open');
+    });
+
+    it('still 400s junk tournamentKey when KV put throws (validation not fail-open)', async () => {
+        env = mockEnv({ kvPutThrows: true });
+        env.CORS_ORIGIN = '*';
+        await expect(handleLivescore(get('/api/livescore?tournamentKey=abc'), env))
+            .rejects.toMatchObject({ status: 400, message: expect.stringMatching(/digits only/i) });
+        const res = await worker.fetch(get('/api/livescore?tour=ITF'), env);
+        expect(res.status).toBe(400);
+        expect([...env.TENNIS_CACHE._store.keys()]).toEqual([]);
+    });
+
+    it('still 429s a full Cache API bucket when KV put throws (RL not fail-open, no KV RL write)', async () => {
+        env = mockEnv({ kvPutThrows: true });
+        env.CORS_ORIGIN = '*';
+        await caches.default.put(rateLimitCacheUrl('livescore', '203.0.113.8'), new Response(
+            JSON.stringify({ count: RL_PER_MINUTE.max, windowStart: Date.now() }),
+            { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=60' } },
+        ));
+        await expect(handleLivescore(get('/api/livescore?tour=ATP'), env))
+            .rejects.toMatchObject({ status: 429, message: expect.stringMatching(/too many requests/i) });
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        expect(res.status).toBe(429);
+        expect([...env.TENNIS_CACHE._store.keys()]).toEqual([]);
     });
 });
