@@ -6,14 +6,13 @@
 // Keeps all pages functional offline — great for CI, demos, and new devs.
 
 import fixturesMock    from './fixtures.js';
-import livescoreMock   from './livescore.js';
 import standingsMock   from './standings.js';
 import tournamentsMock from './tournaments.js';
 import playerMock      from './player.js';
 
 const MOCKS = {
     get_fixtures:    () => fixturesMock,
-    get_livescore:   () => livescoreMock,
+    // get_livescore retired — Scores live is MatchStat, not api-tennis.
     get_standings:   () => standingsMock,
     get_tournaments: () => tournamentsMock,
     get_players:     () => playerMock,
