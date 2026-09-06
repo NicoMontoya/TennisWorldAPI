@@ -2,6 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { handleLivescore } from './livescore.js';
 import { TTL } from '../config.js';
 import { cache } from '../cache.js';
+import worker from '../index.js';
+
+// Dummy env value only — never a real secret. Must not appear in client JSON.
+const DUMMY_KEY = 'dummy-rapidapi-key';
 
 const LIVE_URL = 'https://tennis-api-atp-wta-itf.p.rapidapi.com/tennis/v2/extend/api/events/live';
 const API_TENNIS = 'api.api-tennis.com';
@@ -37,7 +41,8 @@ const fixture = {
 function mockEnv() {
     const store = new Map();
     return {
-        RAPIDAPI_KEY: 'test-rapidapi-key',
+        RAPIDAPI_KEY: DUMMY_KEY,
+        CORS_ORIGIN: '*',
         TENNIS_CACHE: {
             async get(key, type) {
                 const raw = store.get(key);
@@ -139,7 +144,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
         expect(calls.some(c => c.url.includes(API_TENNIS) || c.url.includes('get_livescore'))).toBe(false);
         const liveCall = calls.find(c => c.url === LIVE_URL);
         expect(liveCall.headers['X-RapidAPI-Host']).toBe('tennis-api-atp-wta-itf.p.rapidapi.com');
-        expect(liveCall.headers['X-RapidAPI-Key']).toBe('test-rapidapi-key');
+        expect(liveCall.headers['X-RapidAPI-Key']).toBe(DUMMY_KEY);
 
         expect(data.some(m => m.isLive)).toBe(true);
         const live = data.find(m => m.isLive);
@@ -224,6 +229,60 @@ describe('GET /api/livescore MatchStat live-first', () => {
             'all',
             { skipStale: true },
         );
+    });
+
+    it('worker: mocked MatchStat live is public 200 and never echoes the env key', async () => {
+        installFetch();
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.ok).toBe(true);
+        expect(body.data.some(m => m.isLive)).toBe(true);
+        const row = body.data.find(m => m.isLive);
+        expect(row).toMatchObject({
+            matchKey: expect.any(String),
+            player1Name: expect.any(String),
+            player1Key: expect.any(String),
+            player2Name: expect.any(String),
+            player2Key: expect.any(String),
+            isLive: true,
+            status: 'Live',
+            setScores: expect.any(Array),
+        });
+        const dumped = JSON.stringify(body);
+        expect(dumped).not.toContain(DUMMY_KEY);
+        expect(dumped).not.toMatch(/RAPIDAPI_KEY|TENNIS_API_KEY|X-RapidAPI-Key/i);
+        expect(dumped).not.toMatch(/api-tennis|get_livescore/i);
+    });
+
+    it('upstream error with a key-shaped message does not leak to the client', async () => {
+        const logs = [];
+        vi.spyOn(console, 'error').mockImplementation((...a) => logs.push(a.join(' ')));
+        vi.spyOn(console, 'warn').mockImplementation((...a) => logs.push(a.join(' ')));
+        globalThis.fetch = vi.fn(async (url) => {
+            const u = String(url);
+            if (u.includes('/extend/api/events/live')) {
+                return jsonRes({
+                    error: true,
+                    message: `invalid key ${DUMMY_KEY} at /extend/api/events/live`,
+                });
+            }
+            if (u.includes('/tournament/calendar') && /pageNo=1/.test(u)) {
+                return jsonRes({ data: [mainTour] });
+            }
+            if (u.includes('/tournament/calendar')) return jsonRes({ data: [] });
+            if (u.includes('/fixtures/tournament/')) return jsonRes({ data: [fixture] });
+            if (u.includes('/tournament/results/')) return jsonRes({ data: { singles: [] } });
+            return jsonRes({}, 404);
+        });
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.ok).toBe(true);
+        const dumped = JSON.stringify(body);
+        expect(dumped).not.toContain(DUMMY_KEY);
+        expect(dumped).not.toMatch(/RapidAPI|invalid key|extend\/api/i);
+        expect(logs.join('\n')).not.toContain(DUMMY_KEY);
     });
 
     it('fails soft when live events error and still returns Core fixtures', async () => {

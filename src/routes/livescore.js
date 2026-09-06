@@ -98,10 +98,12 @@ async function loadCalendar(env, tour, now) {
 }
 
 // GET /api/livescore?tour=ATP|WTA&tournamentKey=123
-// Rate limit (Cache API) is on top of cache TTL / freshness, not a replacement.
-// Live source is MatchStat Extend events/live. Core fixtures/results fill
-// Not Started / Finished only — they never set isLive.
-// Live TTL is TTL.livescore (30s); idle ticker is TTL.livescoreIdle (2 min).
+// PUBLIC_GET (auth: false) — Scores ticker. No session / Authorization.
+// Rate limit (Cache API, fail-closed 429) is on top of cache TTL, not a replacement.
+// Live source is MatchStat Extend events/live (env.RAPIDAPI_KEY only).
+// Core fixtures/results fill Not Started / Finished — they never set isLive.
+// Response is the existing fixtures-board shape (string[] setScores) plus
+// currentGame when InPlay. Live TTL 30s / idle 2 min; skipStale.
 export async function handleLivescore(request, env) {
     await rateLimit(env, request, 'livescore');
 

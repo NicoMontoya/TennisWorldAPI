@@ -1,7 +1,11 @@
 # Copy this file to .dev.vars (never commit .dev.vars)
-# Used by wrangler dev for local secrets
+# Used by wrangler dev for local secrets. Production uses `wrangler secret put`.
 
+# MatchStat / RapidAPI — Scores live + Core (fixtures, rankings, draws)
+RAPIDAPI_KEY=your-rapidapi-key-here
+
+# api-tennis.com — leftover routes only (fixtures/tournaments/H2H). Not Scores live.
 TENNIS_API_KEY=your-api-tennis-com-key-here
 
-# Set to "true" to run the full site without an API key (uses mock data)
+# Set to "true" to run leftover api-tennis routes without that key (mock data)
 DEMO_MODE=false

@@ -43,7 +43,7 @@ complete their bracket without earning hindsight points).
 
 ```bash
 npm install
-cp .env.example .dev.vars    # then fill in TENNIS_API_KEY (and optionally RAPIDAPI_KEY, ADMIN_SECRET)
+cp .dev.vars.example .dev.vars    # RAPIDAPI_KEY for Scores live + Core; TENNIS_API_KEY only for leftover api-tennis routes
 npm run dev                  # serves UI + API at http://localhost:8787
 ```
 
@@ -62,8 +62,8 @@ One-time (already done for this account, repeat only on a new account):
 
 ```bash
 npx wrangler kv namespace create TENNIS_CACHE   # put id in wrangler.toml
-npx wrangler secret put TENNIS_API_KEY          # api-tennis.com key
-npx wrangler secret put RAPIDAPI_KEY            # optional: rankings backfill
+npx wrangler secret put RAPIDAPI_KEY            # MatchStat / Scores live + Core (existing secret)
+npx wrangler secret put TENNIS_API_KEY          # leftover api-tennis.com routes only
 npx wrangler secret put ADMIN_SECRET            # protects /api/admin/* (they 401 if unset)
 ```
 
@@ -106,8 +106,8 @@ once so player-profile ranking charts have history immediately (cron keeps them 
   predictions (shared across users — keys are per player-pair+surface). If
   traffic grows, the $5/mo Workers Paid plan raises this to 1M/day.
 - **Requests: 100,000/day** on the free plan — plenty to start.
-- **api-tennis.com plan limits** — the KV cache absorbs most load; watch the provider
-  dashboard during Grand Slams.
+- **RapidAPI / MatchStat plan limits** — Scores live uses the existing `RAPIDAPI_KEY`
+  Worker secret (30s TTL). Leftover api-tennis.com routes still use `TENNIS_API_KEY`.
 
 ## Security notes
 

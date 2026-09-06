@@ -19,9 +19,9 @@ id      = "71f4016e2aa14b9c8bba916d05086fe1"
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
 # Never commit real values. Set with:
-#   npx wrangler secret put TENNIS_API_KEY
-# For local dev, add to api/.dev.vars (git-ignored):
-#   TENNIS_API_KEY=your-key-here
+#   npx wrangler secret put RAPIDAPI_KEY      # Scores live + Core MatchStat
+#   npx wrangler secret put TENNIS_API_KEY    # leftover api-tennis.com routes
+# For local dev, copy .dev.vars.example → .dev.vars (git-ignored).
 
 # ── Vars (non-sensitive config) ────────────────────────────────────────────────
 # ADMIN_SECRET is a secret, not a var: set with `npx wrangler secret put ADMIN_SECRET`

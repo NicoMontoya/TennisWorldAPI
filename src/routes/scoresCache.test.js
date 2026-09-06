@@ -178,6 +178,9 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         const body = await res.json();
         expect(body.ok).toBe(true);
         expect(body.data.some(m => m.isLive)).toBe(true);
+        const dumped = JSON.stringify(body);
+        expect(dumped).not.toMatch(/RAPIDAPI_KEY|TENNIS_API_KEY|X-RapidAPI-Key/i);
+        expect(body.data.every(m => !String(m.matchKey || '').includes('9990001'))).toBe(true);
     });
 
     it('returns freshly computed hub data when KV put quota is exhausted', async () => {
