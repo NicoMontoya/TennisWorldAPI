@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
     RL_PER_MINUTE,
     TOURNAMENT_KEY_RE,
     parseTour,
     parseTournamentKey,
     rateLimit,
+    rateLimitCacheUrl,
 } from './security.js';
 
 function mockEnv() {
@@ -22,6 +23,32 @@ function mockEnv() {
     };
 }
 
+function urlOf(req) {
+    return typeof req === 'string' ? req : req.url;
+}
+
+function installMockCaches() {
+    const store = new Map();
+    const cache = {
+        async match(req) {
+            const entry = store.get(urlOf(req));
+            if (!entry) return undefined;
+            return new Response(entry.body, { status: 200, headers: entry.headers });
+        },
+        async put(req, response) {
+            const headers = {};
+            response.headers.forEach((v, k) => { headers[k] = v; });
+            store.set(urlOf(req), {
+                body: await response.clone().text(),
+                headers,
+            });
+        },
+        _store: store,
+    };
+    globalThis.caches = { default: cache };
+    return cache;
+}
+
 function req(url = 'https://example.test/api/livescore', ip) {
     const headers = {};
     if (ip) headers['CF-Connecting-IP'] = ip;
@@ -33,6 +60,13 @@ async function expectReject(promise, status, messageRe) {
         status,
         message: expect.stringMatching(messageRe),
     });
+}
+
+async function cacheCount(cache, bucket, ip) {
+    const hit = await cache.match(rateLimitCacheUrl(bucket, ip));
+    if (!hit) return undefined;
+    const data = await hit.json();
+    return data.count;
 }
 
 describe('parseTour', () => {
@@ -90,16 +124,22 @@ describe('parseTournamentKey', () => {
 
 describe('rateLimit', () => {
     let env;
-    beforeEach(() => { env = mockEnv(); });
+    let cache;
+    beforeEach(() => {
+        env = mockEnv();
+        cache = installMockCaches();
+    });
+    afterEach(() => { delete globalThis.caches; });
 
-    it('uses _rl:${bucket}:${ip} and allows exactly max ticks in the window', async () => {
+    it('uses Cache API https://rl.internal/${bucket}/${ip} and allows exactly max ticks in the window', async () => {
         const r = req('https://example.test/api/hub', '203.0.113.9');
         for (let i = 0; i < RL_PER_MINUTE.max; i++) {
             await rateLimit(env, r, 'hub');
         }
-        expect(env.TENNIS_CACHE._store.get('_rl:hub:203.0.113.9')).toBe(String(RL_PER_MINUTE.max));
+        expect(await cacheCount(cache, 'hub', '203.0.113.9')).toBe(RL_PER_MINUTE.max);
         await expectReject(rateLimit(env, r, 'hub'), 429, /too many requests/i);
-        expect(env.TENNIS_CACHE._store.get('_rl:hub:203.0.113.9')).toBe(String(RL_PER_MINUTE.max + 1));
+        expect(await cacheCount(cache, 'hub', '203.0.113.9')).toBe(RL_PER_MINUTE.max + 1);
+        expect([...env.TENNIS_CACHE._store.keys()]).toEqual([]);
     });
 
     it('isolates buckets and IPs (hub vs livescore, local fallback)', async () => {
@@ -109,25 +149,43 @@ describe('rateLimit', () => {
         await rateLimit(env, a, 'hub');
         await rateLimit(env, b, 'livescore');
         await rateLimit(env, c, 'hub');
-        expect([...env.TENNIS_CACHE._store.keys()].sort()).toEqual([
-            '_rl:hub:198.51.100.1',
-            '_rl:hub:local',
-            '_rl:livescore:198.51.100.1',
+        expect([...cache._store.keys()].sort()).toEqual([
+            rateLimitCacheUrl('hub', '198.51.100.1'),
+            rateLimitCacheUrl('hub', 'local'),
+            rateLimitCacheUrl('livescore', '198.51.100.1'),
         ]);
+        expect([...env.TENNIS_CACHE._store.keys()]).toEqual([]);
     });
 
-    it('fails closed with 429 when KV is missing or get/put throws', async () => {
+    it('resets the counter when the stored window has elapsed', async () => {
+        const r = req('https://example.test/api/hub', '203.0.113.9');
+        await cache.put(rateLimitCacheUrl('hub', '203.0.113.9'), new Response(
+            JSON.stringify({ count: RL_PER_MINUTE.max, windowStart: Date.now() - 61_000 }),
+            { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=60' } },
+        ));
+        await rateLimit(env, r, 'hub');
+        expect(await cacheCount(cache, 'hub', '203.0.113.9')).toBe(1);
+    });
+
+    it('fails closed with 429 when Cache API is missing or match/put throws', async () => {
         const r = req();
+        delete globalThis.caches;
         await expectReject(rateLimit({}, r, 'livescore'), 429, /too many requests/i);
-        await expectReject(
-            rateLimit({
-                TENNIS_CACHE: {
-                    async get() { throw new Error('kv down'); },
-                    async put() {},
-                },
-            }, r, 'livescore'),
-            429,
-            /too many requests/i,
-        );
+        globalThis.caches = {
+            default: {
+                async match() { throw new Error('cache down'); },
+                async put() {},
+            },
+        };
+        await expectReject(rateLimit({}, r, 'livescore'), 429, /too many requests/i);
+    });
+
+    it('fails closed with 429 when the stored counter is corrupt', async () => {
+        const r = req('https://example.test/api/hub', '203.0.113.9');
+        await cache.put(rateLimitCacheUrl('hub', '203.0.113.9'), new Response(
+            JSON.stringify({ count: 'NaN', windowStart: 'nope' }),
+            { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=60' } },
+        ));
+        await expectReject(rateLimit(env, r, 'hub'), 429, /too many requests/i);
     });
 });

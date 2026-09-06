@@ -12,7 +12,8 @@ One Cloudflare Worker (`tennisworld-api`) serves everything:
 
 - `/*` — static frontend from the sibling `../TennisWorldUI` directory (assets binding)
 - `/api/*` — JSON API (this repo, `src/`)
-- KV (`TENNIS_CACHE`) — response cache, user accounts, sessions, favorites, rate-limit counters
+- KV (`TENNIS_CACHE`) — response cache, user accounts, sessions, favorites, auth rate-limit counters
+- Cache API (`caches.default`) — hub/livescore per-IP rate-limit counters (not KV)
 - Cron (every 6h) — warms standings + calendar caches, seeds rank snapshots
 - Upstreams: [api-tennis.com](https://api-tennis.com) (live data), RapidAPI (historical rankings backfill)
 
@@ -95,10 +96,13 @@ once so player-profile ranking charts have history immediately (cron keeps them 
 
 ## Free-tier quota watch items
 
-- **KV writes: 1,000/day.** Each cache fill, prediction cache, account write, and
-  rate-limit tick is a write. A model auto-fill of a 128-draw caches ~127 predictions
-  (shared across users — keys are per player-pair+surface). If traffic grows, the $5/mo
-  Workers Paid plan raises this to 1M/day.
+- **KV writes: 1,000/day.** Each cache fill, prediction cache, and account write
+  is a write. Hub/livescore rate-limit ticks use the Cache API, not KV — a live
+  Scores tab polling `/api/livescore` every 15s no longer spends the daily quota.
+  Auth register/login still use a KV counter (low volume). A model auto-fill of a
+  128-draw caches ~127 predictions (shared across users — keys are per
+  player-pair+surface). If traffic grows, the $5/mo Workers Paid plan raises this
+  to 1M/day.
 - **Requests: 100,000/day** on the free plan — plenty to start.
 - **api-tennis.com plan limits** — the KV cache absorbs most load; watch the provider
   dashboard during Grand Slams.
@@ -108,6 +112,6 @@ once so player-profile ranking charts have history immediately (cron keeps them 
 - `/api/admin/*` routes require `ADMIN_SECRET` (secret, never a var) and fail closed when unset.
 - Auth: PBKDF2 (100k iters, per-user salt), 30-day KV sessions, Bearer tokens.
 - Register/login are rate-limited per IP (best-effort KV counter, 10 per 10 min).
-- `GET /api/hub` and `GET /api/livescore` are rate-limited per IP (KV counter `_rl:{hub|livescore}:{ip}`, 60 per 60s). Cache TTLs are unchanged.
+- `GET /api/hub` and `GET /api/livescore` are rate-limited per IP via the Cache API (`https://rl.internal/{hub|livescore}/{ip}`, 60 per 60s). Cache TTLs are unchanged. Auth register/login remain on a KV counter.
 - `tour` on hub/livescore/draws is ATP|WTA only. `tournamentKey` on livescore/draws/fixtures is digits-only (`/^\d{1,20}$/`).
 - `.dev.vars` is git-ignored; no secrets in `wrangler.toml` or frontend JS.
