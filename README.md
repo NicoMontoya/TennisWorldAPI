@@ -98,11 +98,13 @@ once so player-profile ranking charts have history immediately (cron keeps them 
 
 - **KV writes: 1,000/day.** Each cache fill, prediction cache, and account write
   is a write. Hub/livescore rate-limit ticks use the Cache API, not KV — a live
-  Scores tab polling `/api/livescore` every 15s no longer spends the daily quota.
-  Auth register/login still use a KV counter (low volume). A model auto-fill of a
-  128-draw caches ~127 predictions (shared across users — keys are per
-  player-pair+surface). If traffic grows, the $5/mo Workers Paid plan raises this
-  to 1M/day.
+  Scores tab polling `/api/livescore` every 15s no longer spends the daily quota
+  on counters. Livescore cache fills skip the `:stale` KV backup (one write per
+  miss). If a KV `put` fails (quota / transient), hub and livescore still return
+  the freshly computed payload instead of 500ing. Auth register/login still use
+  a KV counter (low volume). A model auto-fill of a 128-draw caches ~127
+  predictions (shared across users — keys are per player-pair+surface). If
+  traffic grows, the $5/mo Workers Paid plan raises this to 1M/day.
 - **Requests: 100,000/day** on the free plan — plenty to start.
 - **api-tennis.com plan limits** — the KV cache absorbs most load; watch the provider
   dashboard during Grand Slams.
@@ -112,6 +114,6 @@ once so player-profile ranking charts have history immediately (cron keeps them 
 - `/api/admin/*` routes require `ADMIN_SECRET` (secret, never a var) and fail closed when unset.
 - Auth: PBKDF2 (100k iters, per-user salt), 30-day KV sessions, Bearer tokens.
 - Register/login are rate-limited per IP (best-effort KV counter, 10 per 10 min).
-- `GET /api/hub` and `GET /api/livescore` are rate-limited per IP via the Cache API (`https://rl.internal/{hub|livescore}/{ip}`, 60 per 60s). Cache TTLs are unchanged. Auth register/login remain on a KV counter.
+- `GET /api/hub` and `GET /api/livescore` are rate-limited per IP via the Cache API (`https://rl.internal/{hub|livescore}/{ip}`, 60 per 60s). Livescore cache is 30s when matches are live and 2 min otherwise; hub stays 5 min. Auth register/login remain on a KV counter.
 - `tour` on hub/livescore/draws is ATP|WTA only. `tournamentKey` on livescore/draws/fixtures is digits-only (`/^\d{1,20}$/`).
 - `.dev.vars` is git-ignored; no secrets in `wrangler.toml` or frontend JS.

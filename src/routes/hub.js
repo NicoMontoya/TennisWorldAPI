@@ -1,5 +1,6 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
+import { TTL }      from '../config.js';
 import { parseTour, rateLimit } from '../security.js';
 
 // roundId → display name
@@ -47,7 +48,7 @@ function parseScore(result) {
 }
 
 // GET /api/hub?tour=ATP|WTA
-// Rate limit is on top of the existing 5-minute cache TTL (not a replacement).
+// Rate limit (Cache API) is on top of TTL.hub (5 min), not a replacement.
 export async function handleHub(request, env) {
     await rateLimit(env, request, 'hub');
 
@@ -198,6 +199,6 @@ export async function handleHub(request, env) {
     };
 
     // 5-minute cache — short enough to catch new results during an active day
-    await cache.set(env, 5 * 60, result, ...cacheKey);
+    await cache.set(env, TTL.hub, result, ...cacheKey);
     return result;
 }
