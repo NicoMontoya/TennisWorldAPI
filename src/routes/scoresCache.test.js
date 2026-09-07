@@ -190,6 +190,9 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         const data = await handleHub(get('/api/hub?tour=ATP'), env);
         expect(data.tournament).toMatchObject({ key: '99', name: 'Test Open' });
         expect(data.featuredMatch.player1Name).toBe('Ada');
+        expect(data.featuredMatch.eventType).toBe('ATP Singles');
+        expect(data.featuredMatch.tournamentName).toBe('Test Open');
+        expect(data.recentResults[0].eventType).toBe('ATP Singles');
         expect([...env.TENNIS_CACHE._store.keys()].filter(k => k.startsWith('tw:'))).toEqual([]);
     });
 
@@ -261,7 +264,53 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         expect(data.featuredMatch.matchKey).toBe('889');
         expect(data.featuredMatch.isLive).toBe(true);
         expect(data.featuredMatch.setScores).toEqual(['4-4']);
+        expect(row.eventType).toBe('ATP Singles');
+        expect(data.featuredMatch.eventType).toBe('ATP Singles');
         expect(liveEvents).toHaveBeenCalled();
+    });
+
+    it('labels hub doubles fixtures from the "/" heuristic and omits unknown categories', async () => {
+        const today = new Date().toISOString().slice(0, 10);
+        calendar.mockResolvedValue({
+            data: [{ id: 16743, name: 'U.S. Open', tier: 'Grand Slam', date: today }],
+        });
+        tournamentFixtures.mockResolvedValue({
+            data: [
+                {
+                    id: 900,
+                    player1Id: 10,
+                    player2Id: 20,
+                    player1: { name: 'R. Ram / A. Salisbury' },
+                    player2: { name: 'M. Ebden / W. Koolhof' },
+                    roundId: 12,
+                    date: today,
+                },
+                {
+                    id: 901,
+                    player1Id: 30,
+                    player2Id: 40,
+                    player1: { name: 'Legend A' },
+                    player2: { name: 'Legend B' },
+                    roundId: 9,
+                    date: today,
+                    event_type_type: 'Exhibition',
+                },
+            ],
+        });
+        tournamentResults.mockResolvedValue({ data: { singles: [] } });
+        h2h.mockResolvedValue({ data: [] });
+        liveEvents.mockResolvedValue([]);
+
+        const data = await handleHub(get('/api/hub?tour=ATP&eventType=WTA%20Singles'), env);
+        const doubles = data.todaysMatches.find(m => m.matchKey === '900');
+        expect(doubles.eventType).toBe('ATP Doubles');
+        expect(doubles.round).toBe('Final');
+        expect(doubles.tournamentName).toBe('U.S. Open');
+        const exhibition = data.todaysMatches.find(m => m.matchKey === '901');
+        expect(exhibition.eventType).toBeUndefined();
+        expect(JSON.stringify(data)).not.toMatch(/Exhibition/);
+        // Query-string eventType is not a filter.
+        expect(data.todaysMatches.some(m => m.matchKey === '900')).toBe(true);
     });
 
     it('overlays livescore cache InPlay onto a cached hub first paint without a hub rewrite', async () => {

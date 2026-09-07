@@ -20,6 +20,7 @@ import {
     completedSetChanged,
     stripStickyFlag,
 } from '../transforms/matchstatLive.js';
+import { assignEventType } from '../transforms/eventType.js';
 
 function pickBestActive(items, now) {
     return (items || [])
@@ -48,12 +49,14 @@ function seedMapFrom(fixtures) {
     return seedMap;
 }
 
-function mapFixtureRow(f, { tid, tournamentName, seedMap, todayStr }) {
-    return {
+function mapFixtureRow(f, { tid, tournamentName, seedMap, todayStr, tour }) {
+    const player1Name = f.player1?.name || '';
+    const player2Name = f.player2?.name || '';
+    return assignEventType({
         matchKey:       String(f.id),
-        player1Name:    f.player1?.name || '',
+        player1Name,
         player1Key:     String(f.player1Id || ''),
-        player2Name:    f.player2?.name || '',
+        player2Name,
         player2Key:     String(f.player2Id || ''),
         isLive:         false,
         status:         'Not Started',
@@ -66,19 +69,27 @@ function mapFixtureRow(f, { tid, tournamentName, seedMap, todayStr }) {
         player1Seed:    seedMap.get(f.player1Id) || null,
         player2Seed:    seedMap.get(f.player2Id) || null,
         date:           f.date || todayStr,
-    };
+    }, {
+        raw: f.eventType || f.event_type || f.event_type_type || f.tourType,
+        tour,
+        doubles: false,
+        player1Name,
+        player2Name,
+    });
 }
 
-function mapResultRow(r, { tid, tournamentName, seedMap, todayStr }) {
+function mapResultRow(r, { tid, tournamentName, seedMap, todayStr, tour }) {
     const p1Id = r.player1Id;
     const p2Id = r.player2Id;
     const won  = r.match_winner;
     const winner = won ? (won === p1Id ? 'player1' : 'player2') : null;
-    return {
+    const player1Name = r.player1?.name || '';
+    const player2Name = r.player2?.name || '';
+    return assignEventType({
         matchKey:       String(r.id),
-        player1Name:    r.player1?.name || '',
+        player1Name,
         player1Key:     String(p1Id || ''),
-        player2Name:    r.player2?.name || '',
+        player2Name,
         player2Key:     String(p2Id || ''),
         winner,
         isLive:         false,
@@ -92,7 +103,14 @@ function mapResultRow(r, { tid, tournamentName, seedMap, todayStr }) {
         player1Seed:    seedMap.get(p1Id) || null,
         player2Seed:    seedMap.get(p2Id) || null,
         date:           r.date || todayStr,
-    };
+    }, {
+        raw: r.eventType || r.event_type || r.event_type_type || r.tourType,
+        tour,
+        bucket: 'singles',
+        doubles: false,
+        player1Name,
+        player2Name,
+    });
 }
 
 async function loadCalendar(env, tour, now) {
@@ -188,6 +206,7 @@ export async function handleLivescore(request, env) {
             const cal = parsed ? calendarById.get(parsed.tournamentId) : null;
             return mapLiveEvent(ev, core, {
                 todayStr,
+                tour,
                 tournamentName: ev.league || cal?.name || best?.name || '',
             });
         })
@@ -215,7 +234,7 @@ export async function handleLivescore(request, env) {
             const pk = pairRoundKey(r.player1Id, r.player2Id, r.roundId, tid);
             return pk && todayFxKeys.has(pk);
         });
-        const ctx = { tid, tournamentName, seedMap, todayStr };
+        const ctx = { tid, tournamentName, seedMap, todayStr, tour };
         board.push(
             ...todayFixtures.map(f => mapFixtureRow(f, ctx)),
             ...relevantResults.map(r => mapResultRow(r, ctx)),

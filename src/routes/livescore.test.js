@@ -154,6 +154,48 @@ describe('GET /api/livescore MatchStat live-first', () => {
         expect(live.setScores).toEqual(['6-4', '3-2']);
         expect(live.currentGame).toBe('30 - 15');
         expect(live.status).toBe('Live');
+        expect(live.eventType).toBe('ATP Singles');
+        expect(live.tournamentName).toBe('US Open');
+        expect(live.round).toBe('Final');
+    });
+
+    it('allowlists eventType on Core fixtures and never echoes unknown labels', async () => {
+        installFetch({
+            liveEvents: [],
+            fixtures: [{
+                ...fixture,
+                event_type_type: 'Atp Singles',
+            }, {
+                id: 556,
+                player1Id: 1,
+                player2Id: 2,
+                player1: { name: 'A / B' },
+                player2: { name: 'C / D' },
+                roundId: 9,
+                date: today,
+                event_type_type: 'ATP Doubles',
+            }, {
+                id: 557,
+                player1Id: 3,
+                player2Id: 4,
+                player1: { name: 'Junk A' },
+                player2: { name: 'Junk B' },
+                roundId: 6,
+                date: today,
+                event_type_type: 'Junior Exhibition',
+            }],
+        });
+        const data = await handleLivescore(get('/api/livescore?tour=ATP&eventType=WTA%20Doubles'), env);
+        const singles = data.find(m => m.matchKey === '555');
+        expect(singles.eventType).toBe('ATP Singles');
+        // Doubles fixtures stay off the livescore board (existing isSingles filter).
+        expect(data.some(m => m.matchKey === '556')).toBe(false);
+        const junk = data.find(m => m.matchKey === '557');
+        expect(junk).toBeTruthy();
+        expect(junk.eventType).toBeUndefined();
+        expect(JSON.stringify(data)).not.toMatch(/Junior|Exhibition/);
+        // Query-string eventType is not a filter — singles row still present.
+        expect(data.some(m => m.matchKey === '555')).toBe(true);
     });
 
     it('is not live-from-fixtures-only: empty live + scheduled fixtures stay isLive false', async () => {
@@ -294,6 +336,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
             isLive: true,
             status: 'Live',
             setScores: expect.any(Array),
+            eventType: 'ATP Singles',
         });
         const dumped = JSON.stringify(body);
         expect(dumped).not.toContain(DUMMY_KEY);
