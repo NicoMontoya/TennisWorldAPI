@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { handleLivescore } from './livescore.js';
+import { handleLivescore, livescoreTtlFor } from './livescore.js';
 import { TTL } from '../config.js';
 import { cache } from '../cache.js';
 import worker from '../index.js';
@@ -180,13 +180,14 @@ describe('GET /api/livescore MatchStat live-first', () => {
                 { ...inPlayEvent, id: '2', tourType: 'WTA', matchId: '10-20-20340-9', participant1: 'WTA A' },
                 { ...inPlayEvent, id: '3', tourType: 'ITF', matchId: '11-21-20340-9', participant1: 'ITF A' },
                 { ...inPlayEvent, id: '4', tourType: 'Challenger', matchId: '12-22-20340-9', participant1: 'Ch A' },
+                { ...inPlayEvent, id: '5', tourType: 'ATP', league: 'M25 Cary', matchId: '13-23-20340-9', participant1: 'M25 A' },
             ],
         });
         const data = await handleLivescore(get('/api/livescore?tour=ATP'), env);
         const live = data.filter(m => m.isLive);
         expect(live).toHaveLength(1);
         expect(live[0].player1Name).toBe('J. Sinner');
-        expect(data.some(m => /ITF A|Ch A|WTA A/.test(m.player1Name))).toBe(false);
+        expect(data.some(m => /ITF A|Ch A|WTA A|M25 A/.test(m.player1Name))).toBe(false);
     });
 
     it('filters live events by tournamentKey via the matchId tournament segment', async () => {
@@ -202,18 +203,29 @@ describe('GET /api/livescore MatchStat live-first', () => {
         expect(data.find(m => m.isLive).tournamentKey).toBe('20340');
     });
 
-    it('uses idle TTL when nothing is InPlay and live TTL when something is', async () => {
+    it('uses 30s TTL on match-day fixtures-only so new InPlay is not trapped for 120s', async () => {
         const setSpy = vi.spyOn(cache, 'set');
         installFetch({ liveEvents: [] });
-        await handleLivescore(get('/api/livescore?tour=ATP'), env);
+        const data = await handleLivescore(get('/api/livescore?tour=ATP'), env);
+        expect(data.every(m => m.isLive === false)).toBe(true);
+        expect(data.some(m => m.status === 'Not Started')).toBe(true);
         expect(setSpy).toHaveBeenCalledWith(
             env,
-            TTL.livescoreIdle,
+            TTL.livescore,
             expect.any(Array),
             'livescore3',
             'ATP',
             'all',
             { skipStale: true },
+        );
+        expect(setSpy).not.toHaveBeenCalledWith(
+            env,
+            TTL.livescoreIdle,
+            expect.anything(),
+            expect.anything(),
+            expect.anything(),
+            expect.anything(),
+            expect.anything(),
         );
 
         setSpy.mockClear();
@@ -224,6 +236,38 @@ describe('GET /api/livescore MatchStat live-first', () => {
         expect(setSpy).toHaveBeenCalledWith(
             env,
             TTL.livescore,
+            expect.any(Array),
+            'livescore3',
+            'ATP',
+            'all',
+            { skipStale: true },
+        );
+    });
+
+    it('uses idle TTL only when the board is finished-only / empty', async () => {
+        expect(livescoreTtlFor([])).toBe(TTL.livescoreIdle);
+        expect(livescoreTtlFor([{ isLive: false, status: 'Finished' }])).toBe(TTL.livescoreIdle);
+        expect(livescoreTtlFor([{ isLive: false, status: 'Not Started' }])).toBe(TTL.livescore);
+        expect(livescoreTtlFor([{ isLive: true, status: 'Live' }])).toBe(TTL.livescore);
+
+        const setSpy = vi.spyOn(cache, 'set');
+        const finished = {
+            id: 777,
+            player1Id: 1,
+            player2Id: 2,
+            player1: { name: 'Ada' },
+            player2: { name: 'Bob' },
+            match_winner: 1,
+            result: '6-4 6-3',
+            roundId: 12,
+            date: today,
+        };
+        installFetch({ liveEvents: [], fixtures: [], results: [finished] });
+        const data = await handleLivescore(get('/api/livescore?tour=ATP'), env);
+        expect(data.every(m => m.status === 'Finished')).toBe(true);
+        expect(setSpy).toHaveBeenCalledWith(
+            env,
+            TTL.livescoreIdle,
             expect.any(Array),
             'livescore3',
             'ATP',

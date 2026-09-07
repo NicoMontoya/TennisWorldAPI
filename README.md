@@ -114,6 +114,6 @@ once so player-profile ranking charts have history immediately (cron keeps them 
 - `/api/admin/*` routes require `ADMIN_SECRET` (secret, never a var) and fail closed when unset.
 - Auth: PBKDF2 (100k iters, per-user salt), 30-day KV sessions, Bearer tokens.
 - Register/login are rate-limited per IP (best-effort KV counter, 10 per 10 min).
-- `GET /api/hub` and `GET /api/livescore` are rate-limited per IP via the Cache API (`https://rl.internal/{hub|livescore}/{ip}`, 60 per 60s). Livescore cache is 30s when matches are live and 2 min otherwise; hub stays 5 min. Auth register/login remain on a KV counter.
+- `GET /api/hub` and `GET /api/livescore` are rate-limited per IP via the Cache API (`https://rl.internal/{hub|livescore}/{ip}`, 60 per 60s). Livescore cache is 30s when matches are live or still scheduled today, and 2 min only when the board is finished-only / empty; hub stays 5 min (live overlay from the livescore cache on hit). Auth register/login remain on a KV counter.
 - `tour` on hub/livescore/draws is ATP|WTA only. `tournamentKey` on livescore/draws/fixtures is digits-only (`/^\d{1,20}$/`).
 - `.dev.vars` is git-ignored; no secrets in `wrangler.toml` or frontend JS.

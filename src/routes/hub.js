@@ -2,6 +2,14 @@ import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
 import { parseTour, rateLimit } from '../security.js';
+import {
+    filterLiveEvents,
+    parseMatchId,
+    mapLiveEvent,
+    pairRoundKey,
+    indexCoreMatches,
+    applyLiveOverlayToHub,
+} from '../transforms/matchstatLive.js';
 
 // roundId → display name
 const ROUND_NAME = {
@@ -57,7 +65,7 @@ export async function handleHub(request, env) {
 
     const cacheKey = ['hub3', tour];
     const cached = await cache.get(env, ...cacheKey);
-    if (cached) return cached.data;
+    if (cached) return overlayHubFromLivescoreCache(env, tour, cached.data);
 
     // 1. Fetch this year's calendar (and previous if we're in Jan)
     const now  = new Date();
@@ -74,7 +82,7 @@ export async function handleHub(request, env) {
         }
     } catch (err) {
         const stale = await cache.getStale(env, ...cacheKey);
-        if (stale) return stale.data;
+        if (stale) return overlayHubFromLivescoreCache(env, tour, stale.data);
         throw err;
     }
 
@@ -106,7 +114,7 @@ export async function handleHub(request, env) {
         ]);
     } catch (err) {
         const stale = await cache.getStale(env, ...cacheKey);
-        if (stale) return stale.data;
+        if (stale) return overlayHubFromLivescoreCache(env, tour, stale.data);
         throw err;
     }
 
@@ -137,6 +145,7 @@ export async function handleHub(request, env) {
             roundId:     m.roundId,
             status,
             isLive:      false,
+            currentGame: null,
             date:        m.date || null,
             player1Seed: seedMap.get(p1Id) || null,
             player2Seed: seedMap.get(p2Id) || null,
@@ -151,8 +160,9 @@ export async function handleHub(request, env) {
     upcoming.sort(byWeight);
     completed.sort((a, b) => byWeight(a, b) || (b.date || '').localeCompare(a.date || ''));
 
-    // Featured: prefer highest-round upcoming, fall back to most recently completed
-    const featuredMatch = upcoming[0] || completed[0] || null;
+    // Featured: prefer highest-round upcoming, fall back to most recently completed.
+    // Live overlay below may promote an InPlay today's match.
+    let featuredMatch = upcoming[0] || completed[0] || null;
 
     // Recent results for the ticker/latest strip (up to 10)
     const recentResults = completed.slice(0, 10);
@@ -163,7 +173,27 @@ export async function handleHub(request, env) {
     const completedToday = completed.filter(m => m.date && m.date.startsWith(todayStr));
     // Fixtures don't always carry a date — include all when no date, or filter to today
     const upcomingToday  = upcoming.filter(m => !m.date || m.date.startsWith(todayStr));
-    const todaysMatches  = [...upcomingToday, ...completedToday];
+    let todaysMatches  = [...upcomingToday, ...completedToday];
+
+    // Overlay MatchStat InPlay onto today's rows + featured so first paint
+    // has isLive / setScores / currentGame without a client-side livescore merge.
+    let liveRows = [];
+    try {
+        liveRows = await loadHubLiveRows(env, tour, {
+            fixtures: upcomingRaw,
+            results: completedRaw,
+            tournamentId,
+            calendarItems,
+            todayStr,
+        });
+    } catch { /* fail-soft — hub still returns Core fixtures */ }
+
+    const withLive = applyLiveOverlayToHub(
+        { featuredMatch, todaysMatches },
+        liveRows,
+    );
+    featuredMatch = withLive.featuredMatch;
+    todaysMatches = withLive.todaysMatches;
 
     // 3. Fetch H2H for the featured match (best-effort)
     let h2h = null;
@@ -198,7 +228,48 @@ export async function handleHub(request, env) {
         h2h,
     };
 
-    // 5-minute cache — short enough to catch new results during an active day
+    // 5-minute cache — short enough to catch new results during an active day.
+    // Live scores on a cache hit are refreshed from the livescore KV entry
+    // (no extra hub write) so first paint tracks MatchStat InPlay.
     await cache.set(env, TTL.hub, result, ...cacheKey);
     return result;
+}
+
+async function overlayHubFromLivescoreCache(env, tour, hubData) {
+    try {
+        const liveCached = await cache.get(env, 'livescore3', tour, 'all');
+        const liveRows = (liveCached?.data || []).filter(m => m && m.isLive);
+        if (!liveRows.length) return hubData;
+        return applyLiveOverlayToHub(hubData, liveRows);
+    } catch {
+        return hubData;
+    }
+}
+
+async function loadHubLiveRows(env, tour, { fixtures, results, tournamentId, calendarItems, todayStr }) {
+    let liveRaw = [];
+    try {
+        liveRaw = await rapidAPI.liveEvents(env);
+    } catch {
+        return [];
+    }
+    const calendarById = new Map((calendarItems || []).map(t => [String(t.id), t]));
+    const liveFiltered = filterLiveEvents(liveRaw, {
+        tour,
+        tournamentKey: tournamentId,
+        calendarById,
+    });
+    const coreIndex = indexCoreMatches(
+        new Map([[tournamentId, fixtures || []]]),
+        new Map([[tournamentId, results || []]]),
+    );
+    return liveFiltered
+        .map(ev => {
+            const parsed = parseMatchId(ev.matchId);
+            const core = parsed
+                ? coreIndex.get(pairRoundKey(parsed.player1Id, parsed.player2Id, parsed.roundId, parsed.tournamentId))
+                : null;
+            return mapLiveEvent(ev, core, { todayStr, tournamentName: ev.league || '' });
+        })
+        .filter(Boolean);
 }
