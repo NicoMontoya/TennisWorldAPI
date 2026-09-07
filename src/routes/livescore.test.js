@@ -105,7 +105,8 @@ function installFetch({ liveEvents = [inPlayEvent], fixtures = [fixture], result
             throw new Error('api-tennis.com must not be called from /api/livescore');
         }
         if (u.includes('/extend/api/events/live')) {
-            return jsonRes({ result: liveEvents });
+            // Production MatchStat Extend envelope is { success, results, count }.
+            return jsonRes({ success: true, results: liveEvents, count: liveEvents.length });
         }
         if (u.includes('/tournament/calendar') && /pageNo=1/.test(u)) {
             return jsonRes({ data: [mainTour] });
@@ -253,6 +254,25 @@ describe('GET /api/livescore MatchStat live-first', () => {
         expect(dumped).not.toContain(DUMMY_KEY);
         expect(dumped).not.toMatch(/RAPIDAPI_KEY|TENNIS_API_KEY|X-RapidAPI-Key/i);
         expect(dumped).not.toMatch(/api-tennis|get_livescore/i);
+    });
+
+    it('worker: { results } envelope is 200 non-empty Match[]; junk tour still 400', async () => {
+        installFetch();
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.ok).toBe(true);
+        expect(Array.isArray(body.data)).toBe(true);
+        expect(body.data.length).toBeGreaterThan(0);
+        expect(body.data.some(m => m.isLive && Array.isArray(m.setScores))).toBe(true);
+
+        const junk = await worker.fetch(get('/api/livescore?tour=ITF'), env);
+        expect(junk.status).toBe(400);
+        const junkBody = await junk.json();
+        expect(junkBody).toEqual({
+            ok: false,
+            error: expect.stringMatching(/ATP or WTA/i),
+        });
     });
 
     it('upstream error with a key-shaped message does not leak to the client', async () => {
