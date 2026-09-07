@@ -265,7 +265,6 @@ export const rapidAPI = {
 
     // Extend live board — same RAPIDAPI_KEY / host as Core, different path prefix.
     // GET /tennis/v2/extend/api/events/live
-    // Envelope is { success, results: [...], count } (also result/data aliases).
     // Returns a list (unwrapped). Each item: { id, matchId, tourType, status, score, points, ... }
     // `id` is the live-event namespace and must never be used as Scores matchKey.
     liveEvents: async (env) => {
