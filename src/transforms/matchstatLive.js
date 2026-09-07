@@ -132,6 +132,17 @@ export function pairRoundKey(p1, p2, roundId, tournamentId) {
     return `${lo}|${hi}|${roundId}|${tid}`;
 }
 
+/** Board / Core row → pair+round+tournament key (player order does not matter). */
+export function rowPairKey(m) {
+    if (!m) return '';
+    return pairRoundKey(
+        m.player1Key ?? m.player1Id,
+        m.player2Key ?? m.player2Id,
+        m.roundId,
+        m.tournamentKey ?? m.tournamentId,
+    );
+}
+
 export function keepLiveEventForScores(event, { tour, tournamentKey, calendarById } = {}) {
     if (!liveEventMatchesTour(event, tour)) return false;
     if (isLowerTierNoise(event)) return false;
@@ -153,15 +164,17 @@ export function filterLiveEvents(raw, opts = {}) {
 
 export function indexCoreMatches(fixturesByTid, resultsByTid) {
     const map = new Map();
-    const add = (tid, m) => {
+    const add = (tid, m, overwrite) => {
         const key = pairRoundKey(m.player1Id, m.player2Id, m.roundId, tid);
-        if (key && !map.has(key)) map.set(key, { ...m, tournamentId: String(tid) });
+        if (!key) return;
+        if (overwrite || !map.has(key)) map.set(key, { ...m, tournamentId: String(tid) });
     };
     for (const [tid, list] of fixturesByTid || []) {
-        for (const m of list || []) add(tid, m);
+        for (const m of list || []) add(tid, m, false);
     }
+    // Results overwrite fixtures: fixture id ≠ result id for the same pair.
     for (const [tid, list] of resultsByTid || []) {
-        for (const m of list || []) add(tid, m);
+        for (const m of list || []) add(tid, m, true);
     }
     return map;
 }
@@ -224,21 +237,31 @@ export function mapLiveEvent(event, coreMatch, extras = {}) {
     };
 }
 
+function isFinishedRow(m) {
+    return !!m && !m.isLive && m.status === 'Finished';
+}
+
+function isActiveOverlay(m) {
+    return !!m && (m.isLive || m.status === 'Live' || m.status === 'Finished' || m.status === 'Delayed');
+}
+
 export function mergeLiveOverBoard(board, liveRows) {
     const result = (board || []).map(m => ({ ...m }));
     const byKey  = new Map();
     const byPair = new Map();
     for (const m of result) {
         if (m.matchKey) byKey.set(String(m.matchKey), m);
-        const pk = pairRoundKey(m.player1Key, m.player2Key, m.roundId, m.tournamentKey);
+        const pk = rowPairKey(m);
         if (pk) byPair.set(pk, m);
     }
 
     const extras = [];
     for (const live of liveRows || []) {
         const hit = (live.matchKey && byKey.get(String(live.matchKey)))
-            || byPair.get(pairRoundKey(live.player1Key, live.player2Key, live.roundId, live.tournamentKey));
+            || byPair.get(rowPairKey(live));
         if (hit) {
+            // Results/sticky Finished must not snap back to Upcoming/Not Started.
+            if (isFinishedRow(hit) && !isActiveOverlay(live)) continue;
             hit.isLive      = live.isLive;
             hit.status      = live.status;
             hit.setScores   = live.setScores;
@@ -252,20 +275,202 @@ export function mergeLiveOverBoard(board, liveRows) {
     return [...extras, ...result];
 }
 
-/** Overlay InPlay rows onto hub featured + today's board. Does not add extras. */
+function statusRank(m) {
+    if (!m) return 0;
+    if (m.isLive || m.status === 'Live') return 4;
+    if (m.status === 'Finished') return 3;
+    if (m.status === 'Delayed') return 2;
+    if (m.status === 'Not Started') return 1;
+    return 0;
+}
+
+function preferBoardRow(a, b) {
+    const ra = statusRank(a);
+    const rb = statusRank(b);
+    if (rb !== ra) return rb > ra ? b : a;
+    const sa = (a.setScores || []).length;
+    const sb = (b.setScores || []).length;
+    if (sb !== sa) return sb > sa ? b : a;
+    if (b.winner && !a.winner) return b;
+    if (a.winner && !b.winner) return a;
+    return a;
+}
+
+/** One row per pair+round+tournament. Finished/Live win over a stale fixture. */
+export function dedupeBoardByPair(board) {
+    const byPair = new Map();
+    const leftovers = [];
+    for (const m of board || []) {
+        const pk = rowPairKey(m);
+        if (!pk) {
+            leftovers.push(m);
+            continue;
+        }
+        const prev = byPair.get(pk);
+        byPair.set(pk, prev ? preferBoardRow(prev, m) : m);
+    }
+    return [...leftovers, ...byPair.values()];
+}
+
+/** True when a fixture start is in the past. Date-only is Delayed only after that UTC day. */
+export function isPastScheduledStart(date, now = new Date()) {
+    if (!date) return false;
+    const s = String(date).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+        return s < now.toISOString().slice(0, 10);
+    }
+    const t = Date.parse(s);
+    if (Number.isNaN(t)) return false;
+    return t < now.getTime();
+}
+
+/** Past-start unplayed fixtures → Delayed. Never invents scores. */
+export function markPastStartUnplayed(board, now = new Date()) {
+    return (board || []).map(m => {
+        if (!m || m.isLive || m.status === 'Live' || m.status === 'Finished') return m;
+        if ((m.setScores || []).length) return m;
+        if (!isPastScheduledStart(m.date, now)) return m;
+        return { ...m, status: 'Delayed', isLive: false };
+    });
+}
+
+export function snapshotSeenLive(rows) {
+    return (rows || [])
+        .filter(m => m && (m.isLive || m.status === 'Live' || m.stickyComplete))
+        .map(m => ({
+            matchKey:       String(m.matchKey || ''),
+            player1Key:     String(m.player1Key || ''),
+            player2Key:     String(m.player2Key || ''),
+            player1Name:    m.player1Name || '',
+            player2Name:    m.player2Name || '',
+            roundId:        m.roundId,
+            tournamentKey:  String(m.tournamentKey || ''),
+            setScores:      Array.isArray(m.setScores) ? m.setScores : [],
+            currentGame:    m.currentGame ?? null,
+            stickyComplete: !!m.stickyComplete,
+        }));
+}
+
+export function mergeSeenSnapshots(seen, done) {
+    const map = new Map();
+    const add = (row) => {
+        if (!row) return;
+        const k = rowPairKey(row) || String(row.matchKey || '');
+        if (!k) return;
+        const prev = map.get(k);
+        if (!prev) {
+            map.set(k, row);
+            return;
+        }
+        const prevN = (prev.setScores || []).length;
+        const nextN = (row.setScores || []).length;
+        map.set(k, nextN >= prevN ? row : prev);
+    };
+    for (const row of done || []) add(row);
+    for (const row of seen || []) add(row);
+    return [...map.values()];
+}
+
+export function completedSetChanged(prevDone, nextDone) {
+    const keys = (rows) => new Set(
+        (rows || []).map(r => rowPairKey(r) || String(r.matchKey || '')).filter(Boolean),
+    );
+    const a = keys(prevDone);
+    const b = keys(nextDone);
+    if (a.size !== b.size) return true;
+    for (const k of a) if (!b.has(k)) return true;
+    return false;
+}
+
+function liveIdentityKeys(liveRows) {
+    const keys = new Set();
+    for (const l of liveRows || []) {
+        if (l?.matchKey) keys.add(`k:${l.matchKey}`);
+        const pk = rowPairKey(l);
+        if (pk) keys.add(`p:${pk}`);
+    }
+    return keys;
+}
+
+/**
+ * InPlay that vanished from Extend live stays Finished with last known scores
+ * until Core results confirm. Does not invent scores.
+ */
+export function applyStickyCompletions(board, previousSeen, liveRows) {
+    const liveNow = liveIdentityKeys(liveRows);
+    const result = (board || []).map(m => ({ ...m }));
+    const byKey  = new Map();
+    const byPair = new Map();
+    for (const m of result) {
+        if (m.matchKey) byKey.set(String(m.matchKey), m);
+        const pk = rowPairKey(m);
+        if (pk) byPair.set(pk, m);
+    }
+
+    for (const seen of previousSeen || []) {
+        const pk = rowPairKey(seen);
+        const stillLive = (seen.matchKey && liveNow.has(`k:${seen.matchKey}`))
+            || (pk && liveNow.has(`p:${pk}`));
+        if (stillLive) continue;
+
+        const lastScores = Array.isArray(seen.setScores) ? seen.setScores : [];
+        const hit = (seen.matchKey && byKey.get(String(seen.matchKey)))
+            || (pk && byPair.get(pk));
+
+        if (hit) {
+            if (hit.isLive || hit.status === 'Finished') continue;
+            hit.isLive = false;
+            hit.status = 'Finished';
+            hit.stickyComplete = true;
+            if (lastScores.length && !(hit.setScores || []).length) {
+                hit.setScores = lastScores;
+            }
+            if (seen.currentGame != null && hit.currentGame == null) {
+                hit.currentGame = seen.currentGame;
+            }
+        } else if (lastScores.length || seen.stickyComplete) {
+            const added = {
+                matchKey:      seen.matchKey,
+                player1Key:    seen.player1Key,
+                player2Key:    seen.player2Key,
+                player1Name:   seen.player1Name || '',
+                player2Name:   seen.player2Name || '',
+                isLive:        false,
+                status:        'Finished',
+                setScores:     lastScores,
+                currentGame:   seen.currentGame ?? null,
+                roundId:       seen.roundId,
+                tournamentKey: seen.tournamentKey,
+                stickyComplete: true,
+            };
+            result.push(added);
+            if (added.matchKey) byKey.set(String(added.matchKey), added);
+            if (pk) byPair.set(pk, added);
+        }
+    }
+    return result;
+}
+
+export function stripStickyFlag(row) {
+    if (!row || !('stickyComplete' in row)) return row;
+    const { stickyComplete: _drop, ...rest } = row;
+    return rest;
+}
+
+/** Overlay InPlay / Finished / Delayed onto hub featured + today's board. No extras. */
 export function applyLiveOverlayToHub(hubData, liveRows) {
     if (!hubData) return hubData;
-    const live = (liveRows || []).filter(m => m && m.isLive);
-    if (!live.length) return hubData;
+    const overlay = (liveRows || []).filter(isActiveOverlay);
+    if (!overlay.length) return hubData;
 
     const originalToday = hubData.todaysMatches || [];
     const origKeys = new Set(originalToday.map(m => String(m.matchKey)));
-    const todaysMatches = mergeLiveOverBoard(originalToday, live)
+    const todaysMatches = mergeLiveOverBoard(originalToday, overlay)
         .filter(m => origKeys.has(String(m.matchKey)));
 
     let featuredMatch = hubData.featuredMatch || null;
     if (featuredMatch) {
-        featuredMatch = mergeLiveOverBoard([featuredMatch], live)[0];
+        featuredMatch = mergeLiveOverBoard([featuredMatch], overlay)[0];
     }
     const liveFeatured = todaysMatches.find(m => m.isLive);
     if (liveFeatured && !featuredMatch?.isLive) {

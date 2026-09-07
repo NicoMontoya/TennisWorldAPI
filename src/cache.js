@@ -80,6 +80,17 @@ export const cache = {
     },
 
     /**
+     * setEdge(ttlSeconds, value, ...keyParts)
+     * Cache API only — no KV write. Used for last-InPlay snapshots so
+     * sticky completion can keep scores without extra Free-tier KV puts.
+     */
+    async setEdge(ttlSeconds, value, ...keyParts) {
+        const key = buildKey(...keyParts);
+        const cachedAt = new Date().toISOString();
+        await edgePut(key, { data: value, cachedAt, stale: false }, ttlSeconds);
+    },
+
+    /**
      * set(env, ttlSeconds, value, ...keyParts[, { skipStale }])
      * Writes to edge cache + KV (with TTL), and updates the stale backup
      * unless skipStale is set (livescore: one KV write per fill).

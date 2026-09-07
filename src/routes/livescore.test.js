@@ -248,6 +248,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
         expect(livescoreTtlFor([])).toBe(TTL.livescoreIdle);
         expect(livescoreTtlFor([{ isLive: false, status: 'Finished' }])).toBe(TTL.livescoreIdle);
         expect(livescoreTtlFor([{ isLive: false, status: 'Not Started' }])).toBe(TTL.livescore);
+        expect(livescoreTtlFor([{ isLive: false, status: 'Delayed' }])).toBe(TTL.livescore);
         expect(livescoreTtlFor([{ isLive: true, status: 'Live' }])).toBe(TTL.livescore);
 
         const setSpy = vi.spyOn(cache, 'set');
@@ -347,6 +348,63 @@ describe('GET /api/livescore MatchStat live-first', () => {
         expect(dumped).not.toContain(DUMMY_KEY);
         expect(dumped).not.toMatch(/RapidAPI|invalid key|extend\/api/i);
         expect(logs.join('\n')).not.toContain(DUMMY_KEY);
+    });
+
+    it('results win over a stale same-pair fixture with a different id', async () => {
+        installFetch({
+            liveEvents: [],
+            fixtures: [{
+                id: 1023,
+                player1Id: 45191,
+                player2Id: 59913,
+                player1: { name: 'Mirra Andreeva' },
+                player2: { name: 'Anastasia Potapova' },
+                roundId: 7,
+                date: today,
+            }],
+            results: [{
+                id: 167421758,
+                player1Id: 59913,
+                player2Id: 45191,
+                player1: { name: 'Anastasia Potapova' },
+                player2: { name: 'Mirra Andreeva' },
+                match_winner: 45191,
+                result: '6-4 6-2',
+                roundId: 7,
+                date: today,
+            }],
+        });
+        const data = await handleLivescore(get('/api/livescore?tour=ATP'), env);
+        const pair = data.filter(m =>
+            (m.player1Key === '45191' && m.player2Key === '59913')
+            || (m.player1Key === '59913' && m.player2Key === '45191'),
+        );
+        expect(pair).toHaveLength(1);
+        expect(pair[0].status).toBe('Finished');
+        expect(pair[0].isLive).toBe(false);
+        expect(pair[0].setScores).toEqual(['6-4', '6-2']);
+        expect(pair[0].matchKey).toBe('167421758');
+        expect(data.some(m => m.matchKey === '1023')).toBe(false);
+    });
+
+    it('keeps last InPlay score as Finished when live drops and results are missing', async () => {
+        installFetch({ liveEvents: [inPlayEvent], fixtures: [fixture], results: [] });
+        const first = await handleLivescore(get('/api/livescore?tour=ATP'), env);
+        const live = first.find(m => m.matchKey === '555');
+        expect(live.status).toBe('Live');
+        expect(live.setScores).toEqual(['6-4', '3-2']);
+
+        env.TENNIS_CACHE._store.delete('tw:livescore3:ATP:all');
+        caches.default._store.delete('https://tennisworld-cache.internal/tw:livescore3:ATP:all');
+
+        installFetch({ liveEvents: [], fixtures: [fixture], results: [] });
+        const second = await handleLivescore(get('/api/livescore?tour=ATP'), env);
+        const row = second.find(m => m.matchKey === '555');
+        expect(row.status).toBe('Finished');
+        expect(row.isLive).toBe(false);
+        expect(row.setScores).toEqual(['6-4', '3-2']);
+        expect(row.currentGame).toBe('30 - 15');
+        expect(row).not.toHaveProperty('stickyComplete');
     });
 
     it('fails soft when live events error and still returns Core fixtures', async () => {

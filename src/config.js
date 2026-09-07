@@ -9,6 +9,7 @@
 export const TTL = {
     livescore:     30,            // 30s  — live, or match-day fixtures that can go InPlay
     livescoreIdle: 2  * 60,       //  2 min — finished-only / empty board (nothing can go live)
+    livescoreSeen: 12 * 60 * 60,  // 12 hr — last InPlay / sticky-completion snapshot
     hub:           5  * 60,       //  5 min — featured match + today's board
     drawsLive:     5  * 60,       //  5 min — in-play draw page (not the ticker)
     fixtures:      24 * 60 * 60,  // 24 hr  — match results finalized same day

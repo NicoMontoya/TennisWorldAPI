@@ -13,6 +13,13 @@ import {
     applyLiveOverlayToHub,
     indexCoreMatches,
     unwrapLiveEvents,
+    dedupeBoardByPair,
+    applyStickyCompletions,
+    markPastStartUnplayed,
+    isPastScheduledStart,
+    snapshotSeenLive,
+    completedSetChanged,
+    rowPairKey,
 } from './matchstatLive.js';
 
 const inPlay = {
@@ -178,6 +185,33 @@ describe('mergeLiveOverBoard', () => {
         expect(fixturesOnly.every(m => m.isLive === false)).toBe(true);
     });
 
+    it('does not let live Upcoming snap a Finished result back to Not Started', () => {
+        const board = [{
+            matchKey: '167421758',
+            player1Key: '45191',
+            player2Key: '59913',
+            isLive: false,
+            status: 'Finished',
+            setScores: ['6-4', '6-2'],
+            currentGame: null,
+            roundId: 7,
+            tournamentKey: '16743',
+        }];
+        const merged = mergeLiveOverBoard(board, [{
+            matchKey: '1023',
+            player1Key: '45191',
+            player2Key: '59913',
+            isLive: false,
+            status: 'Not Started',
+            setScores: [],
+            currentGame: null,
+            roundId: 7,
+            tournamentKey: '16743',
+        }]);
+        expect(merged[0].status).toBe('Finished');
+        expect(merged[0].setScores).toEqual(['6-4', '6-2']);
+    });
+
     it('applyLiveOverlayToHub sets isLive/scores on today + featured and does not add extras', () => {
         const hub = {
             featuredMatch: {
@@ -235,14 +269,176 @@ describe('mergeLiveOverBoard', () => {
         expect(over.featuredMatch.isLive).toBe(true);
         expect(applyLiveOverlayToHub(hub, [])).toEqual(hub);
     });
+
+    it('applyLiveOverlayToHub promotes Finished (not isLive-only) onto today + featured', () => {
+        const hub = {
+            featuredMatch: {
+                matchKey: '1023',
+                player1Key: '45191',
+                player2Key: '59913',
+                isLive: false,
+                status: 'Not Started',
+                setScores: [],
+                currentGame: null,
+                roundId: 7,
+                tournamentKey: '16743',
+            },
+            todaysMatches: [{
+                matchKey: '1023',
+                player1Key: '45191',
+                player2Key: '59913',
+                isLive: false,
+                status: 'Not Started',
+                setScores: [],
+                currentGame: null,
+                roundId: 7,
+                tournamentKey: '16743',
+            }],
+        };
+        const over = applyLiveOverlayToHub(hub, [{
+            matchKey: '167421758',
+            player1Key: '59913',
+            player2Key: '45191',
+            isLive: false,
+            status: 'Finished',
+            setScores: ['6-4', '6-2'],
+            currentGame: null,
+            roundId: 7,
+            tournamentKey: '16743',
+        }]);
+        expect(over.todaysMatches).toHaveLength(1);
+        expect(over.todaysMatches[0]).toMatchObject({
+            matchKey: '1023',
+            isLive: false,
+            status: 'Finished',
+            setScores: ['6-4', '6-2'],
+        });
+        expect(over.featuredMatch.status).toBe('Finished');
+        expect(over.featuredMatch.setScores).toEqual(['6-4', '6-2']);
+        expect(over.featuredMatch.isLive).toBe(false);
+    });
+});
+
+describe('dedupe / sticky completion / delayed', () => {
+    it('results win over a stale same-pair fixture (either player order)', () => {
+        const board = [{
+            matchKey: '1023',
+            player1Key: '45191',
+            player2Key: '59913',
+            isLive: false,
+            status: 'Not Started',
+            setScores: [],
+            roundId: 7,
+            tournamentKey: '16743',
+        }, {
+            matchKey: '167421758',
+            player1Key: '59913',
+            player2Key: '45191',
+            isLive: false,
+            status: 'Finished',
+            setScores: ['6-4', '6-2'],
+            winner: 'player1',
+            roundId: 7,
+            tournamentKey: '16743',
+        }];
+        const deduped = dedupeBoardByPair(board);
+        expect(deduped).toHaveLength(1);
+        expect(deduped[0].matchKey).toBe('167421758');
+        expect(deduped[0].status).toBe('Finished');
+        expect(deduped[0].setScores).toEqual(['6-4', '6-2']);
+        expect(rowPairKey(board[0])).toBe(rowPairKey(board[1]));
+    });
+
+    it('sticky marks Finished with last scores after InPlay disappears; true NS stays NS', () => {
+        const fixture = {
+            matchKey: '555',
+            player1Key: '2072',
+            player2Key: '2315',
+            player1Name: 'J. Sinner',
+            player2Name: 'C. Alcaraz',
+            isLive: false,
+            status: 'Not Started',
+            setScores: [],
+            currentGame: null,
+            roundId: 12,
+            tournamentKey: '20340',
+        };
+        const seen = snapshotSeenLive([{
+            ...fixture,
+            isLive: true,
+            status: 'Live',
+            setScores: ['6-4', '3-2'],
+            currentGame: '30 - 15',
+        }]);
+        const sticky = applyStickyCompletions([fixture], seen, []);
+        expect(sticky).toHaveLength(1);
+        expect(sticky[0]).toMatchObject({
+            matchKey: '555',
+            isLive: false,
+            status: 'Finished',
+            setScores: ['6-4', '3-2'],
+            currentGame: '30 - 15',
+        });
+
+        const stillNs = applyStickyCompletions([fixture], [], []);
+        expect(stillNs[0].status).toBe('Not Started');
+        expect(stillNs[0].setScores).toEqual([]);
+
+        const stillLive = applyStickyCompletions([fixture], seen, [{
+            matchKey: '555',
+            player1Key: '2072',
+            player2Key: '2315',
+            isLive: true,
+            status: 'Live',
+            setScores: ['6-4', '5-4'],
+            roundId: 12,
+            tournamentKey: '20340',
+        }]);
+        expect(stillLive[0].status).toBe('Not Started');
+    });
+
+    it('does not invent scores when marking a past-start fixture Delayed', () => {
+        const today = new Date().toISOString().slice(0, 10);
+        const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+        expect(isPastScheduledStart(today)).toBe(false);
+        expect(isPastScheduledStart(yesterday)).toBe(true);
+        expect(isPastScheduledStart('2020-01-01T12:00:00.000Z', new Date('2020-01-01T18:00:00.000Z'))).toBe(true);
+
+        const marked = markPastStartUnplayed([{
+            matchKey: '933',
+            status: 'Not Started',
+            isLive: false,
+            setScores: [],
+            date: '2020-01-01T12:00:00.000Z',
+        }], new Date('2020-01-01T18:00:00.000Z'));
+        expect(marked[0].status).toBe('Delayed');
+        expect(marked[0].setScores).toEqual([]);
+        expect(marked[0].isLive).toBe(false);
+
+        const live = markPastStartUnplayed([{
+            matchKey: '1',
+            status: 'Live',
+            isLive: true,
+            setScores: ['1-0'],
+            date: '2020-01-01T12:00:00.000Z',
+        }], new Date('2020-01-01T18:00:00.000Z'));
+        expect(live[0].status).toBe('Live');
+    });
+
+    it('completedSetChanged is false for the same sticky set (no extra KV write)', () => {
+        const row = { matchKey: '555', player1Key: '1', player2Key: '2', roundId: 12, tournamentKey: '9', stickyComplete: true };
+        expect(completedSetChanged([row], [{ ...row }])).toBe(false);
+        expect(completedSetChanged([], [row])).toBe(true);
+        expect(completedSetChanged([row], [])).toBe(true);
+    });
 });
 
 describe('indexCoreMatches / unwrapLiveEvents', () => {
-    it('indexes fixtures first and unwraps RapidAPI list envelopes', () => {
+    it('lets results overwrite fixtures and unwraps RapidAPI list envelopes', () => {
         const fixtures = new Map([['20340', [{ id: 1, player1Id: 2072, player2Id: 2315, roundId: 12 }]]]);
         const results  = new Map([['20340', [{ id: 9, player1Id: 2072, player2Id: 2315, roundId: 12 }]]]);
         const idx = indexCoreMatches(fixtures, results);
-        expect(idx.get('2072|2315|12|20340').id).toBe(1);
+        expect(idx.get('2072|2315|12|20340').id).toBe(9);
 
         expect(unwrapLiveEvents({ result: [inPlay] })).toEqual([inPlay]);
         expect(unwrapLiveEvents({ data: { events: [inPlay] } })).toEqual([inPlay]);
