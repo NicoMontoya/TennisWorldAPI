@@ -9,3 +9,9 @@ TENNIS_API_KEY=your-api-tennis-com-key-here
 
 # Set to "true" to run leftover api-tennis routes without that key (mock data)
 DEMO_MODE=false
+
+# Protects POST /api/admin/import-* (Sackmann backfills). Production: wrangler secret put ADMIN_SECRET
+ADMIN_SECRET=change-me-local-admin-secret
+
+# Optional. Backfill scripts also accept --worker or WORKER_URL (default http://127.0.0.1:8787).
+# WORKER_URL=https://tennisworld-api.nicomontoya.workers.dev

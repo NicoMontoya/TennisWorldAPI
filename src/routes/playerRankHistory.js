@@ -56,7 +56,7 @@ export async function seedRankSnapshots(env, tour, players) {
 export async function handlePlayerRankHistory(request, env) {
     const { searchParams } = new URL(request.url);
     const tour      = (searchParams.get('tour') || 'ATP').toUpperCase();
-    const playerKey = searchParams.get('playerKey');
+    const playerKey = (searchParams.get('playerKey') || '').trim();
     if (!playerKey) throw new Error('playerKey is required');
 
     // Read stored history

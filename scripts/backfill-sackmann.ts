@@ -4,36 +4,45 @@
 // shows their true ranking arc across their whole career, not just 2 recent years.
 //
 // Prereqs:
-//   - wrangler dev running on :8787
-//   - ../tennis_atp cloned (git clone https://github.com/.../tennis_atp)
-//   - ADMIN_SECRET set in .dev.vars
+//   - Worker reachable (wrangler dev on :8787, or production via --worker / WORKER_URL)
+//   - ../tennis_atp cloned (git clone https://github.com/Kadantte/tennis_atp)
+//   - ADMIN_SECRET in env or .dev.vars (not required for --dry)
 //
-// Run:  bun run scripts/backfill-sackmann.ts [--tour ATP] [--dry]
+// Run:  bun run scripts/backfill-sackmann.ts --tour ATP [--dry] [--worker URL] [--limit N] [--offset N]
 //
-// WTA note: only tennis_atp is cloned locally. To backfill WTA, clone
-// tennis_wta alongside it and this script will pick it up.
+// WTA is out of scope for the ATP runbook. Clone tennis_wta and pass --tour WTA
+// only if you later want that tour.
 
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import {
+    argFlag, argValue, kvWriteNote, loadAdminSecret, resolveDataDir, resolveWorkerUrl,
+} from './lib/backfill-cli.ts';
 
 const here    = dirname(fileURLToPath(import.meta.url));
-const repoDir = join(here, '..');                    // TennisWorldAPI
-const WORKER  = 'http://127.0.0.1:8787';
+const repoDir = join(here, '..');
 const BATCH   = 40;                                  // players per import POST
 
 const argv    = process.argv.slice(2);
-const dryRun  = argv.includes('--dry');
-const tourArg = (() => { const i = argv.indexOf('--tour'); return i >= 0 ? argv[i + 1]?.toUpperCase() : null; })();
+const dryRun  = argFlag(argv, '--dry');
+const tourArg = (argValue(argv, '--tour') || 'ATP').toUpperCase();
+const limit   = (() => { const v = argValue(argv, '--limit'); return v != null ? parseInt(v, 10) : Infinity; })();
+const offset  = (() => { const v = argValue(argv, '--offset'); return v != null ? parseInt(v, 10) : 0; })();
+const WORKER  = resolveWorkerUrl(argv);
+const ADMIN_SECRET = loadAdminSecret(repoDir, { required: !dryRun });
 
-const ADMIN_SECRET = (readFileSync(join(repoDir, '.dev.vars'), 'utf8')
-    .match(/^ADMIN_SECRET\s*=\s*"?([^"\n]+)"?/m) || [])[1];
-if (!ADMIN_SECRET) { console.error('ADMIN_SECRET not found in .dev.vars'); process.exit(1); }
+if (tourArg !== 'ATP' && tourArg !== 'WTA') {
+    console.error('--tour must be ATP or WTA');
+    process.exit(1);
+}
+
+console.log(`Worker: ${WORKER}${dryRun ? '  [dry-run]' : ''}`);
 
 // ── Name normalization for Sackmann ↔ RapidAPI matching ─────────────────────────
 function norm(s: string): string {
     return (s || '').toLowerCase()
-        .normalize('NFD').replace(/[̀-ͯ]/g, '')  // strip accents
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // strip accents
         .replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
@@ -48,7 +57,7 @@ function rows(text: string): string[][] {
 
 async function backfill(tour: 'ATP' | 'WTA') {
     const slug = tour.toLowerCase();
-    const dataDir = join(repoDir, '..', tour === 'ATP' ? 'tennis_atp' : 'tennis_wta');
+    const dataDir = resolveDataDir(repoDir, tour, argv);
     if (!existsSync(dataDir)) {
         console.log(`\n── ${tour}: skipped — ${dataDir} not cloned`);
         return;
@@ -73,8 +82,18 @@ async function backfill(tour: 'ATP' | 'WTA') {
     console.log(`  Sackmann players: ${sidToName.size}`);
 
     // 2. Our ranked roster from the Worker: normalized name → playerKey (RapidAPI).
-    const stand = await (await fetch(`${WORKER}/api/standings?tour=${tour}`)).json() as
-        { ok: boolean; data: Array<{ playerKey: string; name: string }> };
+    let stand: { ok?: boolean; data?: Array<{ playerKey: string; name: string }>; error?: string };
+    try {
+        const res = await fetch(`${WORKER}/api/standings?tour=${tour}`);
+        stand = await res.json() as typeof stand;
+        if (!res.ok || stand?.ok === false) {
+            console.error(`  standings fetch failed: ${stand?.error || res.status}`);
+            return;
+        }
+    } catch (e: any) {
+        console.error(`  standings fetch failed (${WORKER}): ${e.message}`);
+        return;
+    }
     const nameToKey = new Map<string, string>();
     for (const p of (stand.data ?? [])) nameToKey.set(norm(p.name), p.playerKey);
     console.log(`  Roster (standings): ${nameToKey.size}`);
@@ -123,13 +142,16 @@ async function backfill(tour: 'ATP' | 'WTA') {
             .sort((a, b) => a.date.localeCompare(b.date));
     }
 
-    const keys = Object.keys(histories);
+    const allKeys = Object.keys(histories);
+    const keys = allKeys.slice(offset, offset + (Number.isFinite(limit) ? limit : allKeys.length));
     const totalPts = keys.reduce((s, k) => s + histories[k].length, 0);
-    console.log(`  Players with career history: ${keys.length}  (${totalPts.toLocaleString()} points total)`);
+    console.log(`  Players with career history: ${allKeys.length}  (${keys.length} in this slice, offset=${offset})`);
+    console.log(`  Points in slice: ${totalPts.toLocaleString()}`);
     if (keys.length) {
         const deepest = keys.slice().sort((a, b) => histories[b].length - histories[a].length)[0];
         console.log(`  Deepest: playerKey ${deepest} — ${histories[deepest].length} weeks, ${histories[deepest][0].date} → ${histories[deepest].at(-1)!.date}`);
     }
+    console.log(`  ${kvWriteNote(keys.length)}  (1 write per player; reads do not count)`);
 
     if (dryRun) { console.log('  [dry] skipping import'); return; }
     if (!keys.length) return;
@@ -153,6 +175,5 @@ async function backfill(tour: 'ATP' | 'WTA') {
     console.log(`\n  ✓ Written: ${written}, Errors: ${errors}`);
 }
 
-const tours: ('ATP' | 'WTA')[] = tourArg === 'WTA' ? ['WTA'] : tourArg === 'ATP' ? ['ATP'] : ['ATP', 'WTA'];
-for (const t of tours) await backfill(t);
+await backfill(tourArg as 'ATP' | 'WTA');
 console.log('\nDone.');

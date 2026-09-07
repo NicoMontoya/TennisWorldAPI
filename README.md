@@ -94,6 +94,12 @@ Rollback: `npx wrangler rollback` (or redeploy the previous git tag).
 After first deploy: run `curl "$BASE/api/admin/backfill-rankings?tour=ATP&weeksBack=26&secret=…"`
 once so player-profile ranking charts have history immediately (cron keeps them fresh after).
 
+ATP Sackmann historical data (career rank arcs, Time Machine weekly lists,
+vintage legends) is **not** created by that RapidAPI week crawl. Load it from
+the local `../tennis_atp` clone with the three scripts, targeting production
+via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackmann-atp-backfill.md).
+`wrangler dev` KV is local-only; localhost backfills never fill workers.dev.
+
 ## Free-tier quota watch items
 
 - **KV writes: 1,000/day.** Each cache fill, prediction cache, and account write

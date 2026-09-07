@@ -11,12 +11,12 @@
 //   tw:rankings-history-index:v1:{tour}   → { min, max, dates:[ "YYYY-MM-DD", … ] }  (all weekly dates, ascending)
 //
 // 2333 weekly ATP dates (1973→2026) as ~54 year-values + 1 index = ~55 writes
-// total for a full backfill, vs 2333 if stored per-date. Reads load one year
-// value (server-side, cached) and return the requested week.
+// total for a full backfill, vs 2333 if stored per-date. Year payloads and the
+// index are permanent (no TTL) so public GET keeps working after import.
+// Reads load one year value and return the requested week.
 
 const yearKey  = (tour, year) => `tw:rankings-history:v1:${tour}:${year}`;
 const indexKey = (tour)       => `tw:rankings-history-index:v1:${tour}`;
-const YEAR_TTL = 30 * 24 * 60 * 60; // 30d — historical data is effectively static
 
 // ── GET /api/rankings-history ──────────────────────────────────────────────────
 //   ?tour=ATP&meta=1                     → { min, max, count, dates:[…] }
@@ -75,22 +75,33 @@ export async function handleImportRankingsHistory(request, env) {
         throw Object.assign(new Error('Unauthorized'), { status: 401 });
     }
 
-    const { tour, year, snapshots } = await request.json();
+    const { tour, year, snapshots, updateIndex = true, indexDates } = await request.json();
     if (!tour || !year || !snapshots || typeof snapshots !== 'object') {
         throw new Error('tour, year, and snapshots are required');
     }
     const t = String(tour).toUpperCase();
 
-    await env.TENNIS_CACHE.put(yearKey(t, year), JSON.stringify(snapshots), { expirationTtl: YEAR_TTL });
+    // Permanent — Time Machine data is static. A 30d TTL emptied public GET
+    // after the first month (index survived, year payloads vanished).
+    await env.TENNIS_CACHE.put(yearKey(t, year), JSON.stringify(snapshots));
 
-    // Merge this year's dates into the global index (dedup + sort).
+    // Default: merge this year's dates into the index (1 extra write).
+    // Backfill scripts pass updateIndex:false on intermediate years, then
+    // send the full `indexDates` list on the last year so a full ATP load
+    // is ~N year-writes + 1 index write (≈55), not 2N.
+    const shouldWriteIndex = updateIndex !== false || Array.isArray(indexDates);
+    if (!shouldWriteIndex) {
+        return { ok: true, year, weeks: Object.keys(snapshots).length, totalDates: null, indexUpdated: false };
+    }
+
     const index = (await env.TENNIS_CACHE.get(indexKey(t), 'json')) || { dates: [] };
     const set = new Set(index.dates);
-    for (const d of Object.keys(snapshots)) set.add(d);
+    const extra = Array.isArray(indexDates) ? indexDates : Object.keys(snapshots);
+    for (const d of extra) if (d) set.add(d);
     const dates = Array.from(set).sort();
     await env.TENNIS_CACHE.put(indexKey(t), JSON.stringify({
         min: dates[0], max: dates[dates.length - 1], dates,
     }));
 
-    return { ok: true, year, weeks: Object.keys(snapshots).length, totalDates: dates.length };
+    return { ok: true, year, weeks: Object.keys(snapshots).length, totalDates: dates.length, indexUpdated: true };
 }

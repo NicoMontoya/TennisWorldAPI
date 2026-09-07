@@ -7,28 +7,35 @@
 // Inclusion: every player with >= --min career tour-level wins (default 300 →
 // ~182 players, all notable names across every era). Same {age,w,m,t,ms,gs}
 // shape the live RapidAPI path produces (src/routes/vintage.js), so the client
-// treats legends identically. Legend ids are 's'+SackmannId.
+// treats legends identically. Legend ids are 's'+SackmannId (e.g. s103819).
 //
-// Prereqs:  wrangler dev on :8787 · ../tennis_atp cloned · ADMIN_SECRET in .dev.vars
-// Run:      bun run scripts/backfill-vintage-legends.ts [--tour ATP] [--min 300] [--dry]
+// Prereqs:  Worker reachable · ../tennis_atp cloned · ADMIN_SECRET in env or .dev.vars
+// Run:      bun run scripts/backfill-vintage-legends.ts --tour ATP [--min 300] [--dry] [--worker URL]
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import {
+    argFlag, argValue, kvWriteNote, loadAdminSecret, resolveDataDir, resolveWorkerUrl,
+} from './lib/backfill-cli.ts';
 
 const here    = dirname(fileURLToPath(import.meta.url));
 const repoDir = join(here, '..');
-const WORKER  = 'http://127.0.0.1:8787';
 
 const argv    = process.argv.slice(2);
-const dryRun  = argv.includes('--dry');
-const minWins = (() => { const i = argv.indexOf('--min'); return i >= 0 ? parseInt(argv[i + 1], 10) : 300; })();
-const tourArg = (() => { const i = argv.indexOf('--tour'); return i >= 0 ? argv[i + 1]?.toUpperCase() : 'ATP'; })();
+const dryRun  = argFlag(argv, '--dry');
+const minWins = (() => { const v = argValue(argv, '--min'); return v != null ? parseInt(v, 10) : 300; })();
+const tourArg = (argValue(argv, '--tour') || 'ATP').toUpperCase();
 const BATCH   = 20;
+const WORKER  = resolveWorkerUrl(argv);
+const ADMIN_SECRET = loadAdminSecret(repoDir, { required: !dryRun });
 
-const ADMIN_SECRET = (readFileSync(join(repoDir, '.dev.vars'), 'utf8')
-    .match(/^ADMIN_SECRET\s*=\s*"?([^"\n]+)"?/m) || [])[1];
-if (!ADMIN_SECRET) { console.error('ADMIN_SECRET not found in .dev.vars'); process.exit(1); }
+if (tourArg !== 'ATP' && tourArg !== 'WTA') {
+    console.error('--tour must be ATP or WTA');
+    process.exit(1);
+}
+
+console.log(`Worker: ${WORKER}${dryRun ? '  [dry-run]' : ''}`);
 
 const MS_PER_YEAR = 365.2425 * 24 * 60 * 60 * 1000;
 const TOUR_LEVELS = new Set(['G', 'M', 'A', 'F']); // Slam, Masters, ATP tour, Tour Finals (excl. Davis Cup 'D')
@@ -40,11 +47,10 @@ function isoFromYmd(d: string) { return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.s
 
 async function backfill(tour: 'ATP' | 'WTA') {
     const slug = tour.toLowerCase();
-    const dataDir = join(repoDir, '..', `tennis_${slug}`);
+    const dataDir = resolveDataDir(repoDir, tour, argv);
     if (!existsSync(dataDir)) { console.error(`${dataDir} not cloned — skipping ${tour}`); return; }
 
     const matchFiles = readdirSync(dataDir)
-        .filter(f => /^atp_matches_\d{4}\.csv$/.test(f.replace('atp_', `${slug}_`)) || /^atp_matches_\d{4}\.csv$/.test(f))
         .filter(f => new RegExp(`^${slug}_matches_\\d{4}\\.csv$`).test(f))
         .sort();
     if (!matchFiles.length) { console.error(`No ${slug}_matches_YYYY.csv in ${dataDir}`); return; }
@@ -120,6 +126,8 @@ async function backfill(tour: 'ATP' | 'WTA') {
     legends.sort((a, b) => b.wins - a.wins);
     console.log(`${tour}: built ${legends.length} legend curves (${skipped} skipped for missing dob). Top:`,
         legends.slice(0, 5).map(l => `${l.name}(${l.wins})`).join(', '));
+    // 1 write per curve + 1 legends index. Roster cache invalidate is a delete.
+    console.log(kvWriteNote(legends.length + 1));
 
     if (dryRun) {
         const fed = curves['s103819'];

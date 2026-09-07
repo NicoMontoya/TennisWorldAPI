@@ -80,7 +80,7 @@ function corsHeaders(env, request) {
     return {
         'Access-Control-Allow-Origin':  allowOrigin,
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-secret',
         'Vary': 'Origin',
     };
 }
