@@ -182,4 +182,19 @@ describe('indexCoreMatches / unwrapLiveEvents', () => {
         expect(unwrapLiveEvents({ data: { events: [inPlay] } })).toEqual([inPlay]);
         expect(unwrapLiveEvents(null)).toEqual([]);
     });
+
+    it('unwraps MatchStat { results } envelope and maps InPlay to isLive rows', () => {
+        const payload = { success: true, results: [inPlay], count: 1 };
+        const events = unwrapLiveEvents(payload);
+        expect(events).toEqual([inPlay]);
+        expect(unwrapLiveEvents({ results: [inPlay] })).toEqual([inPlay]);
+
+        const mapped = mapLiveEvent(events[0], { id: 555, player1Id: 2072, player2Id: 2315, roundId: 12 });
+        expect(mapped).not.toBeNull();
+        expect(mapped.isLive).toBe(true);
+        expect(mapped.status).toBe('Live');
+        expect(mapped.setScores).toEqual(['6-4', '3-2']);
+        expect(mapped.currentGame).toBe('30 - 15');
+        expect(mapped.matchKey).toBe('555');
+    });
 });

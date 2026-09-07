@@ -53,6 +53,9 @@ export function parseMatchId(matchId) {
 
 export function unwrapLiveEvents(json) {
     if (Array.isArray(json)) return json;
+    // MatchStat Extend live: { success, results: [...], count }
+    if (Array.isArray(json?.results)) return json.results;
+    if (Array.isArray(json?.results?.events)) return json.results.events;
     if (Array.isArray(json?.result)) return json.result;
     if (Array.isArray(json?.result?.events)) return json.result.events;
     if (Array.isArray(json?.data)) return json.data;

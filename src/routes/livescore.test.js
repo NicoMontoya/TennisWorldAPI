@@ -105,7 +105,8 @@ function installFetch({ liveEvents = [inPlayEvent], fixtures = [fixture], result
             throw new Error('api-tennis.com must not be called from /api/livescore');
         }
         if (u.includes('/extend/api/events/live')) {
-            return jsonRes({ result: liveEvents });
+            // Production MatchStat Extend envelope is { success, results, count }.
+            return jsonRes({ success: true, results: liveEvents, count: liveEvents.length });
         }
         if (u.includes('/tournament/calendar') && /pageNo=1/.test(u)) {
             return jsonRes({ data: [mainTour] });
