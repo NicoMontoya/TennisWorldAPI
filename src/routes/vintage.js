@@ -28,7 +28,19 @@ const TTL_TIERMAP = 30 * 24 * 60 * 60;   // 30d — a past year's calendar is im
 // id (the Sackmann player id) so the routes know which source to serve from.
 const legendKey  = (tour, id)  => `tw:vintage:v1:${tour}:${id}`;
 const legendsIdx = (tour)      => `tw:vintage-legends:v1:${tour}`;
-const isLegendId = (key)       => typeof key === 'string' && key.startsWith('s');
+// Inactive / retired legends are keyed 's'+Sackmann numeric id (e.g. s103819).
+// Require digits after s so a stray name ("sampras") is never treated as a legend.
+const SACKMANN_LEGEND_RE = /^s(\d+)$/i;
+
+export function normalizeLegendId(key) {
+    if (typeof key !== 'string') return null;
+    const m = key.trim().match(SACKMANN_LEGEND_RE);
+    return m ? `s${m[1]}` : null;
+}
+
+export function isLegendId(key) {
+    return normalizeLegendId(key) != null;
+}
 
 const MS_PER_YEAR = 365.2425 * 24 * 60 * 60 * 1000;
 const PAGE_SIZE   = 500;
@@ -101,8 +113,10 @@ export async function handleVintageRoster(request, env) {
     const haveName = new Set(roster.map(r => (r.name || '').toLowerCase()));
     let pos = 100;
     for (const L of legends) {
+        const sid = normalizeLegendId(L.id);
+        if (!sid) continue;
         if (haveName.has((L.name || '').toLowerCase())) continue;
-        roster.push({ position: ++pos, id: String(L.id), name: L.name, countryAcr: L.countryAcr, legend: true });
+        roster.push({ position: ++pos, id: sid, name: L.name, countryAcr: L.countryAcr, legend: true });
     }
 
     const data = { roster };
@@ -127,22 +141,30 @@ export async function handleImportVintage(request, env) {
     if (!tour || !curves) throw new Error('tour and curves are required');
     const t = String(tour).toUpperCase();
 
-    let written = 0;
+    let written = 0, skipped = 0;
     for (const [id, curve] of Object.entries(curves)) {
-        await env.TENNIS_CACHE.put(legendKey(t, id), JSON.stringify(curve), { expirationTtl: 400 * 24 * 60 * 60 });
+        const sid = normalizeLegendId(id);
+        if (!sid) { skipped++; continue; }
+        // Permanent — these are static Sackmann-derived curves. A TTL would
+        // silently empty /api/player-vintage for legends after expiry.
+        await env.TENNIS_CACHE.put(legendKey(t, sid), JSON.stringify(curve));
         written++;
     }
     if (Array.isArray(legends)) {
-        // Merge with any existing index (dedup by id), keep sorted by wins desc.
+        // Merge with any existing index (dedup by normalized s+id), keep sorted by wins desc.
         const existing = (await env.TENNIS_CACHE.get(legendsIdx(t), 'json')) || [];
-        const byId = new Map(existing.map(l => [l.id, l]));
-        for (const l of legends) byId.set(l.id, l);
+        const byId = new Map(existing.map(l => [normalizeLegendId(l.id) || l.id, l]));
+        for (const l of legends) {
+            const sid = normalizeLegendId(l.id);
+            if (!sid) continue;
+            byId.set(sid, { ...l, id: sid });
+        }
         const merged = Array.from(byId.values()).sort((a, b) => (b.wins || 0) - (a.wins || 0));
         await env.TENNIS_CACHE.put(legendsIdx(t), JSON.stringify(merged));
     }
     // Invalidate the roster cache so new legends show up in the picker.
     await cache.invalidate(env, 'vintage-roster-v1', t);
-    return { ok: true, written, legends: Array.isArray(legends) ? legends.length : 0 };
+    return { ok: true, written, skipped, legends: Array.isArray(legends) ? legends.length : 0 };
 }
 
 // GET /api/player-vintage?tour=ATP|WTA&playerKey=47275
@@ -150,15 +172,21 @@ export async function handleImportVintage(request, env) {
 export async function handlePlayerVintage(request, env) {
     const { searchParams } = new URL(request.url);
     const tour      = (searchParams.get('tour') || 'ATP').toUpperCase();
-    const playerKey = searchParams.get('playerKey');
+    const playerKey = (searchParams.get('playerKey') || '').trim();
     if (!playerKey) throw new Error('playerKey is required');
 
-    // Retired legend (Sackmann-sourced, 's'-prefixed id): serve the precomputed
+    // Retired legend (Sackmann-sourced, 's'+numeric id): serve the precomputed
     // curve straight from KV. Same shape as the live path below.
-    if (isLegendId(playerKey)) {
-        const curve = await env.TENNIS_CACHE.get(legendKey(tour, playerKey), 'json');
+    const legendId = normalizeLegendId(playerKey);
+    if (legendId) {
+        const curve = await env.TENNIS_CACHE.get(legendKey(tour, legendId), 'json');
         if (curve) return curve;
-        return { player: { id: playerKey, name: null }, points: [], totals: { wins: 0, matches: 0 }, error: 'not-loaded' };
+        return {
+            player: { id: legendId, name: null, legend: true },
+            points: [],
+            totals: { wins: 0, matches: 0, titles: 0, masters: 0, slams: 0 },
+            error: 'not-loaded',
+        };
     }
 
     // v6: bumped a third time — v5's deploy still ran before the tier-map was
