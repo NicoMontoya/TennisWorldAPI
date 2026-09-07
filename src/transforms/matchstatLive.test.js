@@ -141,6 +141,20 @@ describe('matchKey resolution', () => {
         expect(mapped.tournamentKey).toBe('20340');
         expect(mapped.roundId).toBe(12);
         expect(mapped.player1Seed).toBe(1);
+        expect(mapped.eventType).toBe('ATP Singles');
+    });
+
+    it('allowlists MatchStat tourType and omits unknown categories', () => {
+        const core = { id: 555, player1Id: 2072, player2Id: 2315, roundId: 12 };
+        expect(mapLiveEvent({ ...inPlay, tourType: 'ATP Singles' }, core).eventType).toBe('ATP Singles');
+        expect(mapLiveEvent({ ...inPlay, tourType: 'WTA Doubles' }, core, { tour: 'WTA' }).eventType)
+            .toBe('WTA Doubles');
+        expect(mapLiveEvent({ ...inPlay, tourType: 'ATP Mixed' }, core).eventType).toBe('Mixed Doubles');
+        expect(mapLiveEvent({ ...inPlay, tourType: 'ITF' }, core, { tour: 'ATP' }).eventType).toBeUndefined();
+        expect(mapLiveEvent({ ...inPlay, tourType: 'Challenger' }, core).eventType).toBeUndefined();
+        const dumped = JSON.stringify(mapLiveEvent({ ...inPlay, tourType: 'Junior Boys' }, core, { tour: 'ATP' }));
+        expect(dumped).not.toMatch(/Junior|Boys/);
+        expect(dumped).not.toContain('"eventType"');
     });
 
     it('drops events that cannot be keyed without the live event id', () => {

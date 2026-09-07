@@ -15,6 +15,7 @@ import {
     rowPairKey,
     stripStickyFlag,
 } from '../transforms/matchstatLive.js';
+import { assignEventType } from '../transforms/eventType.js';
 import { loadSeenLive } from './livescore.js';
 
 // roundId → display name
@@ -134,32 +135,41 @@ export async function handleHub(request, env) {
         if (f.seed2 && f.player2Id) seedMap.set(f.player2Id, parseInt(f.seed2));
     }
 
-    function transform(m, status) {
+    function transform(m, status, { bucket } = {}) {
         const p1Id  = m.player1Id;
         const p2Id  = m.player2Id;
         const won   = m.match_winner;
         const winner = won ? (won === p1Id ? 'player1' : 'player2') : null;
-        return {
+        const player1Name = m.player1?.name || '';
+        const player2Name = m.player2?.name || '';
+        return assignEventType({
             matchKey:    String(m.id),
-            player1Name: m.player1?.name  || '',
+            player1Name,
             player1Key:  String(p1Id      || ''),
-            player2Name: m.player2?.name  || '',
+            player2Name,
             player2Key:  String(p2Id      || ''),
             winner,
             setScores:   parseScore(m.result),
             round:          ROUND_NAME[m.roundId] || `Round ${m.roundId}`,
             roundId:        m.roundId,
             tournamentKey:  tournamentId,
+            tournamentName: best.name || '',
             status,
             isLive:         false,
             currentGame:    null,
             date:           m.date || null,
             player1Seed:    seedMap.get(p1Id) || null,
             player2Seed:    seedMap.get(p2Id) || null,
-        };
+        }, {
+            raw: m.eventType || m.event_type || m.event_type_type || m.tourType,
+            tour,
+            bucket,
+            player1Name,
+            player2Name,
+        });
     }
 
-    const completed = completedRaw.map(m => transform(m, 'Finished'));
+    const completed = completedRaw.map(m => transform(m, 'Finished', { bucket: 'singles' }));
     const upcoming  = upcomingRaw.map(m  => transform(m, 'Not Started'));
 
     // Sort each group by round importance (highest first)
@@ -304,7 +314,7 @@ async function loadHubLiveRows(env, tour, { fixtures, results, tournamentId, cal
             const core = parsed
                 ? coreIndex.get(pairRoundKey(parsed.player1Id, parsed.player2Id, parsed.roundId, parsed.tournamentId))
                 : null;
-            return mapLiveEvent(ev, core, { todayStr, tournamentName: ev.league || '' });
+            return mapLiveEvent(ev, core, { todayStr, tour, tournamentName: ev.league || '' });
         })
         .filter(Boolean);
 }

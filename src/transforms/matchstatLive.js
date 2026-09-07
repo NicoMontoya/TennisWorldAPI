@@ -1,3 +1,5 @@
+import { assignEventType } from './eventType.js';
+
 // ===================================
 // MatchStat (RapidAPI Extend) live mapping
 // ===================================
@@ -217,11 +219,21 @@ export function mapLiveEvent(event, coreMatch, extras = {}) {
         ? new Date(Number(event.startTimestamp) * 1000).toISOString()
         : extras.todayStr || null;
 
-    return {
+    const player1Name = event.participant1 || coreMatch?.player1?.name || '';
+    const player2Name = event.participant2 || coreMatch?.player2?.name || '';
+    const rawType = event.tourType
+        || event.eventType
+        || event.event_type
+        || event.event_type_type
+        || coreMatch?.eventType
+        || coreMatch?.event_type
+        || coreMatch?.event_type_type;
+
+    return assignEventType({
         matchKey,
-        player1Name:    event.participant1 || coreMatch?.player1?.name || '',
+        player1Name,
         player1Key:     parsed.player1Id,
-        player2Name:    event.participant2 || coreMatch?.player2?.name || '',
+        player2Name,
         player2Key:     parsed.player2Id,
         isLive,
         status,
@@ -234,7 +246,13 @@ export function mapLiveEvent(event, coreMatch, extras = {}) {
         player1Seed:    seedOf(coreMatch, parsed.player1Id),
         player2Seed:    seedOf(coreMatch, parsed.player2Id),
         date,
-    };
+    }, {
+        raw: rawType,
+        tour: extras.tour,
+        doubles: isDoublesEvent(event),
+        player1Name,
+        player2Name,
+    });
 }
 
 function isFinishedRow(m) {
@@ -268,6 +286,8 @@ export function mergeLiveOverBoard(board, liveRows) {
             hit.currentGame = live.currentGame;
             if (!hit.player1Name && live.player1Name) hit.player1Name = live.player1Name;
             if (!hit.player2Name && live.player2Name) hit.player2Name = live.player2Name;
+            if (!hit.eventType && live.eventType) hit.eventType = live.eventType;
+            if (!hit.tournamentName && live.tournamentName) hit.tournamentName = live.tournamentName;
         } else {
             extras.push(live);
         }
@@ -348,6 +368,7 @@ export function snapshotSeenLive(rows) {
             setScores:      Array.isArray(m.setScores) ? m.setScores : [],
             currentGame:    m.currentGame ?? null,
             stickyComplete: !!m.stickyComplete,
+            ...(m.eventType ? { eventType: m.eventType } : {}),
         }));
 }
 
@@ -442,6 +463,7 @@ export function applyStickyCompletions(board, previousSeen, liveRows) {
                 roundId:       seen.roundId,
                 tournamentKey: seen.tournamentKey,
                 stickyComplete: true,
+                ...(seen.eventType ? { eventType: seen.eventType } : {}),
             };
             result.push(added);
             if (added.matchKey) byKey.set(String(added.matchKey), added);
