@@ -315,6 +315,105 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         expect(calendar.mock.calls.length).toBe(calendarCalls);
     });
 
+    it('hub drops a stale fixture when Core results have the same pair', async () => {
+        const today = new Date().toISOString().slice(0, 10);
+        calendar.mockResolvedValue({
+            data: [{ id: 16743, name: 'U.S. Open', tier: 'Grand Slam', date: today }],
+        });
+        tournamentFixtures.mockResolvedValue({
+            data: [{
+                id: 1023,
+                player1Id: 45191,
+                player2Id: 59913,
+                player1: { name: 'Mirra Andreeva' },
+                player2: { name: 'Anastasia Potapova' },
+                roundId: 7,
+                date: today,
+            }],
+        });
+        tournamentResults.mockResolvedValue({
+            data: {
+                singles: [{
+                    id: 167421758,
+                    player1Id: 59913,
+                    player2Id: 45191,
+                    player1: { name: 'Anastasia Potapova' },
+                    player2: { name: 'Mirra Andreeva' },
+                    match_winner: 45191,
+                    result: '6-4 6-2',
+                    roundId: 7,
+                    date: today,
+                }],
+            },
+        });
+        h2h.mockResolvedValue({ data: [] });
+        liveEvents.mockResolvedValue([]);
+
+        const data = await handleHub(get('/api/hub?tour=ATP'), env);
+        const pair = data.todaysMatches.filter(m =>
+            (m.player1Key === '45191' && m.player2Key === '59913')
+            || (m.player1Key === '59913' && m.player2Key === '45191'),
+        );
+        expect(pair).toHaveLength(1);
+        expect(pair[0]).toMatchObject({
+            matchKey: '167421758',
+            status: 'Finished',
+            isLive: false,
+            setScores: ['6-4', '6-2'],
+        });
+        expect(data.featuredMatch.status).toBe('Finished');
+        expect(data.featuredMatch.matchKey).toBe('167421758');
+    });
+
+    it('overlays livescore Finished onto a cached hub first paint without a hub rewrite', async () => {
+        const today = new Date().toISOString().slice(0, 10);
+        calendar.mockResolvedValue({
+            data: [{ id: 16743, name: 'U.S. Open', tier: 'Grand Slam', date: today }],
+        });
+        tournamentFixtures.mockResolvedValue({
+            data: [{
+                id: 1023,
+                player1Id: 45191,
+                player2Id: 59913,
+                player1: { name: 'Mirra Andreeva' },
+                player2: { name: 'Anastasia Potapova' },
+                roundId: 7,
+                date: today,
+            }],
+        });
+        tournamentResults.mockResolvedValue({ data: { singles: [] } });
+        h2h.mockResolvedValue({ data: [] });
+        liveEvents.mockResolvedValue([]);
+
+        const first = await handleHub(get('/api/hub?tour=ATP'), env);
+        expect(first.todaysMatches[0].status).toBe('Not Started');
+
+        await cache.set(env, TTL.livescore, [{
+            matchKey: '167421758',
+            player1Key: '59913',
+            player2Key: '45191',
+            player1Name: 'Anastasia Potapova',
+            player2Name: 'Mirra Andreeva',
+            isLive: false,
+            status: 'Finished',
+            setScores: ['6-4', '6-2'],
+            currentGame: null,
+            roundId: 7,
+            tournamentKey: '16743',
+        }], 'livescore3', 'ATP', 'all', { skipStale: true });
+
+        liveEvents.mockClear();
+        const calendarCalls = calendar.mock.calls.length;
+        const second = await handleHub(get('/api/hub?tour=ATP'), env);
+        const row = second.todaysMatches.find(m => m.matchKey === '1023');
+        expect(row.status).toBe('Finished');
+        expect(row.isLive).toBe(false);
+        expect(row.setScores).toEqual(['6-4', '6-2']);
+        expect(second.featuredMatch.status).toBe('Finished');
+        expect(liveEvents).not.toHaveBeenCalled();
+        expect(calendar.mock.calls.length).toBe(calendarCalls);
+    });
+
     it('hub live overlay fails soft when MatchStat errors', async () => {
         seedHubUpstream();
         liveEvents.mockRejectedValue(new Error('Upstream request failed'));

@@ -9,7 +9,13 @@ import {
     pairRoundKey,
     indexCoreMatches,
     applyLiveOverlayToHub,
+    dedupeBoardByPair,
+    applyStickyCompletions,
+    markPastStartUnplayed,
+    rowPairKey,
+    stripStickyFlag,
 } from '../transforms/matchstatLive.js';
+import { loadSeenLive } from './livescore.js';
 
 // roundId → display name
 const ROUND_NAME = {
@@ -141,14 +147,15 @@ export async function handleHub(request, env) {
             player2Key:  String(p2Id      || ''),
             winner,
             setScores:   parseScore(m.result),
-            round:       ROUND_NAME[m.roundId] || `Round ${m.roundId}`,
-            roundId:     m.roundId,
+            round:          ROUND_NAME[m.roundId] || `Round ${m.roundId}`,
+            roundId:        m.roundId,
+            tournamentKey:  tournamentId,
             status,
-            isLive:      false,
-            currentGame: null,
-            date:        m.date || null,
-            player1Seed: seedMap.get(p1Id) || null,
-            player2Seed: seedMap.get(p2Id) || null,
+            isLive:         false,
+            currentGame:    null,
+            date:           m.date || null,
+            player1Seed:    seedMap.get(p1Id) || null,
+            player2Seed:    seedMap.get(p2Id) || null,
         };
     }
 
@@ -157,12 +164,17 @@ export async function handleHub(request, env) {
 
     // Sort each group by round importance (highest first)
     const byWeight = (a, b) => (ROUND_WEIGHT[b.roundId] || 0) - (ROUND_WEIGHT[a.roundId] || 0);
-    upcoming.sort(byWeight);
+    const finishedKeys = new Set(completed.map(rowPairKey).filter(Boolean));
+    const upcomingOpen = upcoming.filter(m => {
+        const pk = rowPairKey(m);
+        return !pk || !finishedKeys.has(pk);
+    });
+    upcomingOpen.sort(byWeight);
     completed.sort((a, b) => byWeight(a, b) || (b.date || '').localeCompare(a.date || ''));
 
-    // Featured: prefer highest-round upcoming, fall back to most recently completed.
+    // Featured: prefer highest-round still-open fixture, fall back to completed.
     // Live overlay below may promote an InPlay today's match.
-    let featuredMatch = upcoming[0] || completed[0] || null;
+    let featuredMatch = upcomingOpen[0] || completed[0] || null;
 
     // Recent results for the ticker/latest strip (up to 10)
     const recentResults = completed.slice(0, 10);
@@ -172,8 +184,14 @@ export async function handleHub(request, env) {
     const todayStr = now.toISOString().split('T')[0];
     const completedToday = completed.filter(m => m.date && m.date.startsWith(todayStr));
     // Fixtures don't always carry a date — include all when no date, or filter to today
-    const upcomingToday  = upcoming.filter(m => !m.date || m.date.startsWith(todayStr));
-    let todaysMatches  = [...upcomingToday, ...completedToday];
+    const upcomingTodayAll = upcoming.filter(m => !m.date || m.date.startsWith(todayStr));
+    const upcomingToday  = upcomingOpen.filter(m => !m.date || m.date.startsWith(todayStr));
+    const extraFinished = completed.filter(m => {
+        if (m.date && m.date.startsWith(todayStr)) return false;
+        const pk = rowPairKey(m);
+        return pk && upcomingTodayAll.some(u => rowPairKey(u) === pk);
+    });
+    let todaysMatches = dedupeBoardByPair([...upcomingToday, ...completedToday, ...extraFinished]);
 
     // Overlay MatchStat InPlay onto today's rows + featured so first paint
     // has isLive / setScores / currentGame without a client-side livescore merge.
@@ -188,12 +206,27 @@ export async function handleHub(request, env) {
         });
     } catch { /* fail-soft — hub still returns Core fixtures */ }
 
+    let seen = [];
+    try {
+        seen = await loadSeenLive(env, tour, 'all');
+    } catch { /* fail-soft — hub still returns Core fixtures */ }
+    todaysMatches = applyStickyCompletions(todaysMatches, seen, liveRows);
+    if (featuredMatch) {
+        featuredMatch = applyStickyCompletions([featuredMatch], seen, liveRows)[0];
+    }
+    todaysMatches = markPastStartUnplayed(todaysMatches, now);
+    if (featuredMatch) {
+        featuredMatch = markPastStartUnplayed([featuredMatch], now)[0];
+    }
+
     const withLive = applyLiveOverlayToHub(
         { featuredMatch, todaysMatches },
         liveRows,
     );
     featuredMatch = withLive.featuredMatch;
     todaysMatches = withLive.todaysMatches;
+    featuredMatch = featuredMatch ? stripStickyFlag(featuredMatch) : featuredMatch;
+    todaysMatches = todaysMatches.map(stripStickyFlag);
 
     // 3. Fetch H2H for the featured match (best-effort)
     let h2h = null;
@@ -238,7 +271,9 @@ export async function handleHub(request, env) {
 async function overlayHubFromLivescoreCache(env, tour, hubData) {
     try {
         const liveCached = await cache.get(env, 'livescore3', tour, 'all');
-        const liveRows = (liveCached?.data || []).filter(m => m && m.isLive);
+        const liveRows = (liveCached?.data || []).filter(m =>
+            m && (m.isLive || m.status === 'Finished' || m.status === 'Delayed'),
+        );
         if (!liveRows.length) return hubData;
         return applyLiveOverlayToHub(hubData, liveRows);
     } catch {

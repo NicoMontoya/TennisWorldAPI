@@ -29,6 +29,7 @@ describe('TTL.livescore', () => {
         expect(TTL.livescore).toBeGreaterThanOrEqual(30);
         expect(TTL.livescore).toBeLessThanOrEqual(60);
         expect(TTL.livescoreIdle).toBe(120);
+        expect(TTL.livescoreSeen).toBe(12 * 60 * 60);
         expect(TTL.hub).toBe(5 * 60);
         expect(TTL.drawsLive).toBe(5 * 60);
         expect(TTL.fixtures).toBe(24 * 60 * 60);
@@ -77,5 +78,31 @@ describe('cache.set fail-soft', () => {
         });
         expect([...env.store.keys()]).toEqual(['tw:livescore2:ATP:all']);
         expect(env.store.has('tw:livescore2:ATP:all:stale')).toBe(false);
+    });
+
+    it('setEdge writes Cache API only and does not touch KV', async () => {
+        const store = new Map();
+        globalThis.caches = {
+            default: {
+                async match(req) {
+                    const url = typeof req === 'string' ? req : req.url;
+                    const entry = store.get(url);
+                    if (!entry) return undefined;
+                    return new Response(entry.body, { status: 200, headers: entry.headers });
+                },
+                async put(req, response) {
+                    const url = typeof req === 'string' ? req : req.url;
+                    const headers = {};
+                    response.headers.forEach((v, k) => { headers[k] = v; });
+                    store.set(url, { body: await response.clone().text(), headers });
+                },
+            },
+        };
+        const env = kvEnv();
+        await cache.setEdge(3600, [{ matchKey: '1' }], 'livescore3', 'ATP', 'all', 'seen');
+        expect([...env.store.keys()]).toEqual([]);
+        const hit = await cache.get(env, 'livescore3', 'ATP', 'all', 'seen');
+        expect(hit.data).toEqual([{ matchKey: '1' }]);
+        delete globalThis.caches;
     });
 });

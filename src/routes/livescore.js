@@ -12,6 +12,13 @@ import {
     mapLiveEvent,
     mergeLiveOverBoard,
     pairRoundKey,
+    dedupeBoardByPair,
+    applyStickyCompletions,
+    markPastStartUnplayed,
+    snapshotSeenLive,
+    mergeSeenSnapshots,
+    completedSetChanged,
+    stripStickyFlag,
 } from '../transforms/matchstatLive.js';
 
 function pickBestActive(items, now) {
@@ -102,6 +109,9 @@ async function loadCalendar(env, tour, now) {
 // Rate limit (Cache API, fail-closed 429) is on top of cache TTL, not a replacement.
 // Live source is MatchStat Extend events/live (env.RAPIDAPI_KEY only).
 // Core fixtures/results fill Not Started / Finished — they never set isLive.
+// Same-pair results drop stale fixtures (fixture id ≠ result id).
+// InPlay that vanishes from Extend stays Finished with last scores (sticky)
+// until Core results confirm. Past-start unplayed → Delayed, no invented scores.
 // Response is the existing fixtures-board shape (string[] setScores) plus
 // currentGame when InPlay. 30s TTL when InPlay or scheduled today;
 // idle 2 min only when the board is finished-only / empty. skipStale.
@@ -195,15 +205,32 @@ export async function handleLivescore(request, env) {
         const cal      = calendarById.get(tid);
         const tournamentName = cal?.name || best?.name || '';
         const todayFixtures = fixtures.filter(f => !f.date || String(f.date).startsWith(todayStr));
-        const completedToday = results.filter(r => r.date && String(r.date).startsWith(todayStr));
+        const todayFxKeys = new Set(
+            todayFixtures.map(f => pairRoundKey(f.player1Id, f.player2Id, f.roundId, tid)).filter(Boolean),
+        );
+        // Include today's results, plus any result that covers a today's fixture
+        // (result date can lag or sit in a different id namespace).
+        const relevantResults = results.filter(r => {
+            if (r.date && String(r.date).startsWith(todayStr)) return true;
+            const pk = pairRoundKey(r.player1Id, r.player2Id, r.roundId, tid);
+            return pk && todayFxKeys.has(pk);
+        });
         const ctx = { tid, tournamentName, seedMap, todayStr };
         board.push(
             ...todayFixtures.map(f => mapFixtureRow(f, ctx)),
-            ...completedToday.map(r => mapResultRow(r, ctx)),
+            ...relevantResults.map(r => mapResultRow(r, ctx)),
         );
     }
 
-    const data = mergeLiveOverBoard(board, liveRows);
+    let data = dedupeBoardByPair(board);
+    data = mergeLiveOverBoard(data, liveRows);
+    const seenKey = tournamentKey || 'all';
+    const prevSeen = await loadSeenLive(env, tour, seenKey);
+    data = applyStickyCompletions(data, prevSeen, liveRows);
+    data = markPastStartUnplayed(data, now);
+    const snapshot = snapshotSeenLive(data);
+    await persistSeenLive(env, tour, seenKey, snapshot, prevSeen);
+    data = data.map(stripStickyFlag);
 
     // Match-day fixtures-only boards must not use the 120s idle TTL — a new
     // InPlay mid-window would stay hidden until expiry (Scores flicker).
@@ -220,6 +247,41 @@ export async function handleLivescore(request, env) {
 /** 30s while anything is live or still scheduled; 120s only when nothing can go InPlay. */
 export function livescoreTtlFor(board) {
     const rows = Array.isArray(board) ? board : [];
-    const watchForLive = rows.some(m => m.isLive || m.status === 'Not Started');
+    const watchForLive = rows.some(m =>
+        m.isLive || m.status === 'Not Started' || m.status === 'Delayed',
+    );
     return watchForLive ? TTL.livescore : TTL.livescoreIdle;
+}
+
+export async function loadSeenLive(env, tour, tournamentKey) {
+    try {
+        const tk = tournamentKey || 'all';
+        const seen = await cache.get(env, 'livescore3', tour, tk, 'seen');
+        const done = await cache.get(env, 'livescore3', tour, tk, 'done');
+        return mergeSeenSnapshots(seen?.data, done?.data);
+    } catch {
+        return [];
+    }
+}
+
+/** Edge snapshot every fill (free). KV only when the completed-match set changes. */
+export async function persistSeenLive(env, tour, tournamentKey, snapshot, previous) {
+    const tk = tournamentKey || 'all';
+    try {
+        await cache.setEdge(TTL.livescoreSeen, snapshot, 'livescore3', tour, tk, 'seen');
+    } catch { /* edge put is already fail-soft */ }
+
+    const nextDone = (snapshot || []).filter(s => s.stickyComplete);
+    const prevDone = (previous || []).filter(s => s.stickyComplete);
+    if (!completedSetChanged(prevDone, nextDone)) return;
+    await cache.set(
+        env,
+        TTL.livescoreSeen,
+        nextDone,
+        'livescore3',
+        tour,
+        tk,
+        'done',
+        { skipStale: true },
+    );
 }
