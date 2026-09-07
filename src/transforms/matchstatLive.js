@@ -110,7 +110,8 @@ export function isDoublesEvent(event) {
 
 export function isLowerTierNoise(event) {
     const blob = `${event?.tourType || ''} ${event?.league || ''}`;
-    return /itf|challenger/i.test(blob);
+    // ITF/Challenger plus common ITF league codes (M15/M25/W15/W25).
+    return /itf|challenger|\b[MW]\s?(15|25)\b/i.test(blob);
 }
 
 export function liveEventMatchesTour(event, tour) {
@@ -249,4 +250,26 @@ export function mergeLiveOverBoard(board, liveRows) {
         }
     }
     return [...extras, ...result];
+}
+
+/** Overlay InPlay rows onto hub featured + today's board. Does not add extras. */
+export function applyLiveOverlayToHub(hubData, liveRows) {
+    if (!hubData) return hubData;
+    const live = (liveRows || []).filter(m => m && m.isLive);
+    if (!live.length) return hubData;
+
+    const originalToday = hubData.todaysMatches || [];
+    const origKeys = new Set(originalToday.map(m => String(m.matchKey)));
+    const todaysMatches = mergeLiveOverBoard(originalToday, live)
+        .filter(m => origKeys.has(String(m.matchKey)));
+
+    let featuredMatch = hubData.featuredMatch || null;
+    if (featuredMatch) {
+        featuredMatch = mergeLiveOverBoard([featuredMatch], live)[0];
+    }
+    const liveFeatured = todaysMatches.find(m => m.isLive);
+    if (liveFeatured && !featuredMatch?.isLive) {
+        featuredMatch = liveFeatured;
+    }
+    return { ...hubData, todaysMatches, featuredMatch };
 }

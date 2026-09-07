@@ -10,6 +10,7 @@ import {
     resolveMatchKey,
     mapLiveEvent,
     mergeLiveOverBoard,
+    applyLiveOverlayToHub,
     indexCoreMatches,
     unwrapLiveEvents,
 } from './matchstatLive.js';
@@ -79,6 +80,12 @@ describe('tour + lower-tier filter', () => {
         expect(liveEventMatchesTour({ tourType: 'Challenger' }, 'ATP')).toBe(false);
         expect(isLowerTierNoise({ tourType: 'ATP', league: 'ATP Challenger Cary' })).toBe(true);
         expect(isLowerTierNoise({ tourType: 'ATP', league: 'US Open' })).toBe(false);
+        expect(isLowerTierNoise({ tourType: 'ATP', league: 'M25 Idanha-a-Nova' })).toBe(true);
+        expect(isLowerTierNoise({ tourType: 'WTA', league: 'W15 Santa Tecla' })).toBe(true);
+        expect(isLowerTierNoise({ tourType: 'ATP', league: 'M15 Monastir' })).toBe(true);
+        expect(isLowerTierNoise({ tourType: 'WTA', league: 'W25 Istanbul' })).toBe(true);
+        expect(isLowerTierNoise({ tourType: 'WTA', league: 'WTA 250' })).toBe(false);
+        expect(isLowerTierNoise({ tourType: 'ATP', league: 'ATP 250' })).toBe(false);
     });
 
     it('filterLiveEvents applies tour, tournamentKey, doubles, and calendar main-tour', () => {
@@ -87,6 +94,7 @@ describe('tour + lower-tier filter', () => {
             { ...inPlay, id: '2', tourType: 'WTA', matchId: '1-2-3-12' },
             { ...inPlay, id: '3', tourType: 'ITF', matchId: '1-2-3-12' },
             { ...inPlay, id: '4', tourType: 'Challenger', matchId: '1-2-3-12' },
+            { ...inPlay, id: '4b', tourType: 'ATP', league: 'M25 Cary', matchId: '1-2-4-12' },
             { ...inPlay, id: '5', participant1: 'A / B', participant2: 'C / D', matchId: '9-8-20340-7' },
             { ...inPlay, id: '6', matchId: '10-20-99-6', league: 'Some 250' },
             { ...inPlay, id: '7', matchId: 'bad' },
@@ -168,6 +176,64 @@ describe('mergeLiveOverBoard', () => {
 
         const fixturesOnly = mergeLiveOverBoard(board, []);
         expect(fixturesOnly.every(m => m.isLive === false)).toBe(true);
+    });
+
+    it('applyLiveOverlayToHub sets isLive/scores on today + featured and does not add extras', () => {
+        const hub = {
+            featuredMatch: {
+                matchKey: '866',
+                player1Name: 'A. Sabalenka',
+                isLive: false,
+                status: 'Not Started',
+                setScores: [],
+                currentGame: null,
+                roundId: 9,
+            },
+            todaysMatches: [
+                {
+                    matchKey: '889',
+                    player1Key: '32480',
+                    player2Key: '42098',
+                    player1Name: 'A. Kalinskaya',
+                    player2Name: 'E. Navarro',
+                    isLive: false,
+                    status: 'Not Started',
+                    setScores: [],
+                    currentGame: null,
+                    roundId: 7,
+                    tournamentKey: '16743',
+                },
+            ],
+        };
+        const live = [{
+            matchKey: '889',
+            player1Key: '32480',
+            player2Key: '42098',
+            isLive: true,
+            status: 'Live',
+            setScores: ['4-4'],
+            currentGame: '0 - 15',
+            roundId: 7,
+            tournamentKey: '16743',
+        }, {
+            matchKey: 'other-tour',
+            player1Key: '1',
+            player2Key: '2',
+            isLive: true,
+            status: 'Live',
+            setScores: ['1-0'],
+            currentGame: '15 - 0',
+            roundId: 6,
+            tournamentKey: '99',
+        }];
+        const over = applyLiveOverlayToHub(hub, live);
+        expect(over.todaysMatches).toHaveLength(1);
+        expect(over.todaysMatches[0].isLive).toBe(true);
+        expect(over.todaysMatches[0].setScores).toEqual(['4-4']);
+        expect(over.todaysMatches[0].currentGame).toBe('0 - 15');
+        expect(over.featuredMatch.matchKey).toBe('889');
+        expect(over.featuredMatch.isLive).toBe(true);
+        expect(applyLiveOverlayToHub(hub, [])).toEqual(hub);
     });
 });
 
