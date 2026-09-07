@@ -205,6 +205,125 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         expect(body.data.tournament.name).toBe('Test Open');
     });
 
+    it('merges MatchStat InPlay onto hub todaysMatches and featured on a fresh fetch', async () => {
+        const today = new Date().toISOString().slice(0, 10);
+        calendar.mockResolvedValue({
+            data: [{ id: 16743, name: 'U.S. Open', tier: 'Grand Slam', date: today }],
+        });
+        tournamentFixtures.mockResolvedValue({
+            data: [
+                {
+                    id: 866,
+                    player1Id: 18455,
+                    player2Id: 66597,
+                    player1: { name: 'Aryna Sabalenka' },
+                    player2: { name: 'Linda Noskova' },
+                    seed1: '1',
+                    seed2: '6',
+                    roundId: 9,
+                    date: `${today}T18:30:00.000Z`,
+                },
+                {
+                    id: 889,
+                    player1Id: 32480,
+                    player2Id: 42098,
+                    player1: { name: 'Anna Kalinskaya' },
+                    player2: { name: 'Emma Navarro' },
+                    seed1: '21',
+                    seed2: '26',
+                    roundId: 7,
+                    date: today,
+                },
+            ],
+        });
+        tournamentResults.mockResolvedValue({ data: { singles: [] } });
+        h2h.mockResolvedValue({ data: [] });
+        liveEvents.mockResolvedValue([{
+            id: '3815999',
+            participant1: 'A. Kalinskaya',
+            participant2: 'E. Navarro',
+            league: 'US Open',
+            score: '4-4',
+            status: 'InPlay',
+            points: '0-15',
+            tourType: 'ATP',
+            matchId: '32480-42098-16743-7',
+        }]);
+
+        const data = await handleHub(get('/api/hub?tour=ATP'), env);
+        const row = data.todaysMatches.find(m => m.matchKey === '889');
+        expect(row).toMatchObject({
+            isLive: true,
+            status: 'Live',
+            setScores: ['4-4'],
+            currentGame: '0 - 15',
+        });
+        expect(data.featuredMatch.matchKey).toBe('889');
+        expect(data.featuredMatch.isLive).toBe(true);
+        expect(data.featuredMatch.setScores).toEqual(['4-4']);
+        expect(liveEvents).toHaveBeenCalled();
+    });
+
+    it('overlays livescore cache InPlay onto a cached hub first paint without a hub rewrite', async () => {
+        const today = new Date().toISOString().slice(0, 10);
+        calendar.mockResolvedValue({
+            data: [{ id: 16743, name: 'U.S. Open', tier: 'Grand Slam', date: today }],
+        });
+        tournamentFixtures.mockResolvedValue({
+            data: [{
+                id: 889,
+                player1Id: 32480,
+                player2Id: 42098,
+                player1: { name: 'Anna Kalinskaya' },
+                player2: { name: 'Emma Navarro' },
+                seed1: '21',
+                seed2: '26',
+                roundId: 7,
+                date: today,
+            }],
+        });
+        tournamentResults.mockResolvedValue({ data: { singles: [] } });
+        h2h.mockResolvedValue({ data: [] });
+        liveEvents.mockResolvedValue([]);
+
+        const first = await handleHub(get('/api/hub?tour=ATP'), env);
+        expect(first.todaysMatches[0].isLive).toBe(false);
+
+        await cache.set(env, TTL.livescore, [{
+            matchKey: '889',
+            player1Key: '32480',
+            player2Key: '42098',
+            player1Name: 'Anna Kalinskaya',
+            player2Name: 'Emma Navarro',
+            isLive: true,
+            status: 'Live',
+            setScores: ['4-4'],
+            currentGame: '0 - 15',
+            roundId: 7,
+            tournamentKey: '16743',
+        }], 'livescore3', 'ATP', 'all', { skipStale: true });
+
+        liveEvents.mockClear();
+        const calendarCalls = calendar.mock.calls.length;
+        const second = await handleHub(get('/api/hub?tour=ATP'), env);
+        const row = second.todaysMatches.find(m => m.matchKey === '889');
+        expect(row.isLive).toBe(true);
+        expect(row.setScores).toEqual(['4-4']);
+        expect(row.currentGame).toBe('0 - 15');
+        expect(second.featuredMatch.isLive).toBe(true);
+        expect(liveEvents).not.toHaveBeenCalled();
+        expect(calendar.mock.calls.length).toBe(calendarCalls);
+    });
+
+    it('hub live overlay fails soft when MatchStat errors', async () => {
+        seedHubUpstream();
+        liveEvents.mockRejectedValue(new Error('Upstream request failed'));
+        const data = await handleHub(get('/api/hub?tour=ATP'), env);
+        expect(data.tournament).toMatchObject({ key: '99', name: 'Test Open' });
+        expect(data.featuredMatch.player1Name).toBe('Ada');
+        expect(data.featuredMatch.isLive).toBe(false);
+    });
+
     it('still 400s junk tournamentKey when KV put throws (validation not fail-open)', async () => {
         env = mockEnv({ kvPutThrows: true });
         env.CORS_ORIGIN = '*';

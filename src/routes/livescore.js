@@ -103,7 +103,8 @@ async function loadCalendar(env, tour, now) {
 // Live source is MatchStat Extend events/live (env.RAPIDAPI_KEY only).
 // Core fixtures/results fill Not Started / Finished — they never set isLive.
 // Response is the existing fixtures-board shape (string[] setScores) plus
-// currentGame when InPlay. Live TTL 30s / idle 2 min; skipStale.
+// currentGame when InPlay. 30s TTL when InPlay or scheduled today;
+// idle 2 min only when the board is finished-only / empty. skipStale.
 export async function handleLivescore(request, env) {
     await rateLimit(env, request, 'livescore');
 
@@ -204,13 +205,21 @@ export async function handleLivescore(request, env) {
 
     const data = mergeLiveOverBoard(board, liveRows);
 
-    const hasLive = data.some(m => m.isLive);
+    // Match-day fixtures-only boards must not use the 120s idle TTL — a new
+    // InPlay mid-window would stay hidden until expiry (Scores flicker).
     await cache.set(
         env,
-        hasLive ? TTL.livescore : TTL.livescoreIdle,
+        livescoreTtlFor(data),
         data,
         ...cacheKey,
         { skipStale: true },
     );
     return data;
+}
+
+/** 30s while anything is live or still scheduled; 120s only when nothing can go InPlay. */
+export function livescoreTtlFor(board) {
+    const rows = Array.isArray(board) ? board : [];
+    const watchForLive = rows.some(m => m.isLive || m.status === 'Not Started');
+    return watchForLive ? TTL.livescore : TTL.livescoreIdle;
 }
