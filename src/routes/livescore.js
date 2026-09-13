@@ -132,7 +132,9 @@ async function loadCalendar(env, tour, now) {
 // until Core results confirm. Past-start unplayed → Delayed, no invented scores.
 // Response is the existing fixtures-board shape (string[] setScores) plus
 // currentGame when InPlay. 30s TTL when InPlay or scheduled today;
-// idle 2 min only when the board is finished-only / empty. skipStale.
+// idle 2 min only when the board is finished-only / empty.
+// Payload is Cache API only (no KV put). Sticky-completion `:done` still
+// uses KV when the completed-match set changes.
 export async function handleLivescore(request, env) {
     await rateLimit(env, request, 'livescore');
 
@@ -253,13 +255,10 @@ export async function handleLivescore(request, env) {
 
     // Match-day fixtures-only boards must not use the 120s idle TTL — a new
     // InPlay mid-window would stay hidden until expiry (Scores flicker).
-    await cache.set(
-        env,
-        livescoreTtlFor(data),
-        data,
-        ...cacheKey,
-        { skipStale: true },
-    );
+    // Payload is Cache API only — no KV put (Free-tier write budget).
+    try {
+        await cache.setEdge(livescoreTtlFor(data), data, ...cacheKey);
+    } catch { /* edge put is already fail-soft */ }
     return data;
 }
 

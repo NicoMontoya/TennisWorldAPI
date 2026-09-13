@@ -272,9 +272,13 @@ export async function handleHub(request, env) {
     };
 
     // 5-minute cache — short enough to catch new results during an active day.
-    // Live scores on a cache hit are refreshed from the livescore KV entry
-    // (no extra hub write) so first paint tracks MatchStat InPlay.
-    await cache.set(env, TTL.hub, result, ...cacheKey);
+    // Cache API only (no KV put) so poll-heavy Scores tabs do not burn the
+    // Free-tier write budget. Live scores on a cache hit are refreshed from
+    // the livescore edge entry (no extra hub write) so first paint tracks
+    // MatchStat InPlay.
+    try {
+        await cache.setEdge(TTL.hub, result, ...cacheKey);
+    } catch { /* edge put is already fail-soft */ }
     return result;
 }
 

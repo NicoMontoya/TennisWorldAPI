@@ -93,6 +93,17 @@ function installMockCaches() {
     return edge;
 }
 
+function throwOnPayloadEdgePut() {
+    const origPut = caches.default.put.bind(caches.default);
+    caches.default.put = async (req, response) => {
+        const url = urlOf(req);
+        if (String(url).includes('tennisworld-cache.internal')) {
+            throw new Error('Cache API put failed');
+        }
+        return origPut(req, response);
+    };
+}
+
 function get(path, ip = '203.0.113.8') {
     return new Request(`https://example.test${path}`, {
         headers: { 'CF-Connecting-IP': ip },
@@ -140,12 +151,20 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         vi.restoreAllMocks();
     });
 
-    it('caches live livescore at TTL.livescore (30s) and skips the :stale KV write', async () => {
+    it('caches live livescore at TTL.livescore (30s) via Cache API only (no KV payload put)', async () => {
         const setSpy = vi.spyOn(cache, 'set');
+        const edgeSpy = vi.spyOn(cache, 'setEdge');
         const data = await handleLivescore(get('/api/livescore?tour=ATP'), env);
         expect(Array.isArray(data)).toBe(true);
         expect(data.some(m => m.isLive)).toBe(true);
-        expect(setSpy).toHaveBeenCalledWith(
+        expect(edgeSpy).toHaveBeenCalledWith(
+            TTL.livescore,
+            expect.any(Array),
+            'livescore3',
+            'ATP',
+            'all',
+        );
+        expect(setSpy).not.toHaveBeenCalledWith(
             env,
             TTL.livescore,
             expect.any(Array),
@@ -155,9 +174,35 @@ describe('hub/livescore cache freshness + fail-soft', () => {
             { skipStale: true },
         );
         const kvKeys = [...env.TENNIS_CACHE._store.keys()];
-        expect(kvKeys).toContain('tw:livescore3:ATP:all');
+        expect(kvKeys).not.toContain('tw:livescore3:ATP:all');
         expect(kvKeys.some(k => k.endsWith(':stale'))).toBe(false);
         expect(kvKeys.filter(k => k.startsWith('_rl:'))).toEqual([]);
+        expect(caches.default._store.has('https://tennisworld-cache.internal/tw:livescore3:ATP:all')).toBe(true);
+    });
+
+    it('caches hub payload via Cache API only (no KV payload put)', async () => {
+        const setSpy = vi.spyOn(cache, 'set');
+        const edgeSpy = vi.spyOn(cache, 'setEdge');
+        seedHubUpstream();
+        const data = await handleHub(get('/api/hub?tour=ATP'), env);
+        expect(data.tournament).toMatchObject({ key: '99', name: 'Test Open' });
+        expect(edgeSpy).toHaveBeenCalledWith(
+            TTL.hub,
+            expect.objectContaining({ tournament: expect.objectContaining({ key: '99' }) }),
+            'hub3',
+            'ATP',
+        );
+        expect(setSpy).not.toHaveBeenCalledWith(
+            env,
+            TTL.hub,
+            expect.anything(),
+            'hub3',
+            'ATP',
+        );
+        const kvKeys = [...env.TENNIS_CACHE._store.keys()];
+        expect(kvKeys).not.toContain('tw:hub3:ATP');
+        expect(kvKeys).not.toContain('tw:hub3:ATP:stale');
+        expect(caches.default._store.has('https://tennisworld-cache.internal/tw:hub3:ATP')).toBe(true);
     });
 
     it('returns freshly computed livescore data when KV put quota is exhausted', async () => {
@@ -338,7 +383,7 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         const first = await handleHub(get('/api/hub?tour=ATP'), env);
         expect(first.todaysMatches[0].isLive).toBe(false);
 
-        await cache.set(env, TTL.livescore, [{
+        await cache.setEdge(TTL.livescore, [{
             matchKey: '889',
             player1Key: '32480',
             player2Key: '42098',
@@ -350,7 +395,7 @@ describe('hub/livescore cache freshness + fail-soft', () => {
             currentGame: '0 - 15',
             roundId: 7,
             tournamentKey: '16743',
-        }], 'livescore3', 'ATP', 'all', { skipStale: true });
+        }], 'livescore3', 'ATP', 'all');
 
         liveEvents.mockClear();
         const calendarCalls = calendar.mock.calls.length;
@@ -437,7 +482,7 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         const first = await handleHub(get('/api/hub?tour=ATP'), env);
         expect(first.todaysMatches[0].status).toBe('Not Started');
 
-        await cache.set(env, TTL.livescore, [{
+        await cache.setEdge(TTL.livescore, [{
             matchKey: '167421758',
             player1Key: '59913',
             player2Key: '45191',
@@ -449,7 +494,7 @@ describe('hub/livescore cache freshness + fail-soft', () => {
             currentGame: null,
             roundId: 7,
             tournamentKey: '16743',
-        }], 'livescore3', 'ATP', 'all', { skipStale: true });
+        }], 'livescore3', 'ATP', 'all');
 
         liveEvents.mockClear();
         const calendarCalls = calendar.mock.calls.length;
@@ -480,6 +525,34 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         const res = await worker.fetch(get('/api/livescore?tour=ITF'), env);
         expect(res.status).toBe(400);
         expect([...env.TENNIS_CACHE._store.keys()]).toEqual([]);
+    });
+
+    it('returns freshly computed livescore data when Cache API put fails', async () => {
+        throwOnPayloadEdgePut();
+        const data = await handleLivescore(get('/api/livescore?tour=ATP'), env);
+        expect(data.some(m => m.isLive)).toBe(true);
+        expect(data[0].player1Name).toMatch(/Alcaraz/i);
+    });
+
+    it('maps livescore Cache API put failure to HTTP 200 { ok:true, data }', async () => {
+        env.CORS_ORIGIN = '*';
+        throwOnPayloadEdgePut();
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.ok).toBe(true);
+        expect(body.data.some(m => m.isLive)).toBe(true);
+    });
+
+    it('maps hub Cache API put failure to HTTP 200 { ok:true, data }', async () => {
+        env.CORS_ORIGIN = '*';
+        seedHubUpstream();
+        throwOnPayloadEdgePut();
+        const res = await worker.fetch(get('/api/hub?tour=ATP'), env);
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.ok).toBe(true);
+        expect(body.data.tournament.name).toBe('Test Open');
     });
 
     it('still 429s a full Cache API bucket when KV put throws (RL not fail-open, no KV RL write)', async () => {
