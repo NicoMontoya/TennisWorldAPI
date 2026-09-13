@@ -3,6 +3,8 @@
 // ===================================
 // Layer 1 — Cloudflare Cache API (edge, very fast, ~free)
 //   Bypassed in local wrangler dev (Cache API unavailable) — silent fail.
+//   Hub/livescore *payloads* live here only (setEdge) so they do not burn
+//   Free-tier KV writes. Rate-limit counters are also Cache API (security.js).
 //
 // Layer 2 — Workers KV (persistent, global, survives restarts)
 //   Primary entries have TTL set by each route.
@@ -81,8 +83,9 @@ export const cache = {
 
     /**
      * setEdge(ttlSeconds, value, ...keyParts)
-     * Cache API only — no KV write. Used for last-InPlay snapshots so
-     * sticky completion can keep scores without extra Free-tier KV puts.
+     * Cache API only — no KV write. Used for hub/livescore public payloads
+     * and last-InPlay snapshots so poll-heavy Scores tabs do not burn
+     * Free-tier KV writes.
      */
     async setEdge(ttlSeconds, value, ...keyParts) {
         const key = buildKey(...keyParts);
@@ -93,7 +96,9 @@ export const cache = {
     /**
      * set(env, ttlSeconds, value, ...keyParts[, { skipStale }])
      * Writes to edge cache + KV (with TTL), and updates the stale backup
-     * unless skipStale is set (livescore: one KV write per fill).
+     * unless skipStale is set (sticky-completion `:done`: one KV write
+     * when the completed-match set changes). Hub/livescore *payloads* use
+     * setEdge instead — they must not burn Free-tier KV writes.
      * KV put failures are swallowed — callers still hold `value`.
      */
     async set(env, ttlSeconds, value, ...keyParts) {

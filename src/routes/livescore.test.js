@@ -247,42 +247,46 @@ describe('GET /api/livescore MatchStat live-first', () => {
 
     it('uses 30s TTL on match-day fixtures-only so new InPlay is not trapped for 120s', async () => {
         const setSpy = vi.spyOn(cache, 'set');
+        const edgeSpy = vi.spyOn(cache, 'setEdge');
         installFetch({ liveEvents: [] });
         const data = await handleLivescore(get('/api/livescore?tour=ATP'), env);
         expect(data.every(m => m.isLive === false)).toBe(true);
         expect(data.some(m => m.status === 'Not Started')).toBe(true);
-        expect(setSpy).toHaveBeenCalledWith(
-            env,
+        expect(edgeSpy).toHaveBeenCalledWith(
             TTL.livescore,
             expect.any(Array),
             'livescore3',
             'ATP',
             'all',
-            { skipStale: true },
         );
         expect(setSpy).not.toHaveBeenCalledWith(
             env,
-            TTL.livescoreIdle,
+            expect.any(Number),
+            expect.any(Array),
+            'livescore3',
+            'ATP',
+            'all',
             expect.anything(),
+        );
+        expect(edgeSpy).not.toHaveBeenCalledWith(
+            TTL.livescoreIdle,
             expect.anything(),
             expect.anything(),
             expect.anything(),
             expect.anything(),
         );
 
-        setSpy.mockClear();
+        edgeSpy.mockClear();
         env.TENNIS_CACHE._store.clear();
         caches.default._store.clear();
         installFetch({ liveEvents: [inPlayEvent] });
         await handleLivescore(get('/api/livescore?tour=ATP'), env);
-        expect(setSpy).toHaveBeenCalledWith(
-            env,
+        expect(edgeSpy).toHaveBeenCalledWith(
             TTL.livescore,
             expect.any(Array),
             'livescore3',
             'ATP',
             'all',
-            { skipStale: true },
         );
     });
 
@@ -293,7 +297,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
         expect(livescoreTtlFor([{ isLive: false, status: 'Delayed' }])).toBe(TTL.livescore);
         expect(livescoreTtlFor([{ isLive: true, status: 'Live' }])).toBe(TTL.livescore);
 
-        const setSpy = vi.spyOn(cache, 'set');
+        const edgeSpy = vi.spyOn(cache, 'setEdge');
         const finished = {
             id: 777,
             player1Id: 1,
@@ -308,14 +312,12 @@ describe('GET /api/livescore MatchStat live-first', () => {
         installFetch({ liveEvents: [], fixtures: [], results: [finished] });
         const data = await handleLivescore(get('/api/livescore?tour=ATP'), env);
         expect(data.every(m => m.status === 'Finished')).toBe(true);
-        expect(setSpy).toHaveBeenCalledWith(
-            env,
+        expect(edgeSpy).toHaveBeenCalledWith(
             TTL.livescoreIdle,
             expect.any(Array),
             'livescore3',
             'ATP',
             'all',
-            { skipStale: true },
         );
     });
 

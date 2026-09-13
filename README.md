@@ -12,8 +12,8 @@ One Cloudflare Worker (`tennisworld-api`) serves everything:
 
 - `/*` — static frontend from the sibling `../TennisWorldUI` directory (assets binding)
 - `/api/*` — JSON API (this repo, `src/`)
-- KV (`TENNIS_CACHE`) — response cache, user accounts, sessions, favorites, auth rate-limit counters
-- Cache API (`caches.default`) — hub/livescore per-IP rate-limit counters (not KV)
+- KV (`TENNIS_CACHE`) — durable cache (rankings, vintage, match logs, auth, sessions, favorites). Not used for hub/livescore *payloads*.
+- Cache API (`caches.default`) — hub/livescore public payloads + per-IP rate-limit counters (not KV)
 - Cron (every 6h) — warms standings + calendar caches, seeds rank snapshots
 - Upstreams: MatchStat / RapidAPI `tennis-api-atp-wta-itf` (live scores via Extend `/extend/api/events/live`, plus Core fixtures/rankings/draws). api-tennis.com remains for a few legacy routes (tournaments, surface standings) — not Scores live.
 
@@ -102,15 +102,17 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
 
 ## Free-tier quota watch items
 
-- **KV writes: 1,000/day.** Each cache fill, prediction cache, and account write
-  is a write. Hub/livescore rate-limit ticks use the Cache API, not KV — a live
-  Scores tab polling `/api/livescore` every 15s no longer spends the daily quota
-  on counters. Livescore cache fills skip the `:stale` KV backup (one write per
-  miss). If a KV `put` fails (quota / transient), hub and livescore still return
-  the freshly computed payload instead of 500ing. Auth register/login still use
-  a KV counter (low volume). A model auto-fill of a 128-draw caches ~127
-  predictions (shared across users — keys are per player-pair+surface). If
-  traffic grows, the $5/mo Workers Paid plan raises this to 1M/day.
+- **KV writes: 1,000/day.** Durable cache fills (rankings, vintage, match logs),
+  prediction cache, and account writes count. Hub/livescore *payloads* and
+  rate-limit ticks use the Cache API, not KV — a live Scores tab polling
+  `/api/livescore` every 15s does not spend the daily quota on match JSON or
+  counters. Sticky-completion `:done` snapshots still write KV only when the
+  completed-match set changes. If a cache `put` fails (quota / transient / Cache
+  API), hub and livescore still return the freshly computed payload instead of
+  500ing. Auth register/login still use a KV counter (low volume). A model
+  auto-fill of a 128-draw caches ~127 predictions (shared across users — keys
+  are per player-pair+surface). If traffic grows, the $5/mo Workers Paid plan
+  raises this to 1M/day.
 - **Requests: 100,000/day** on the free plan — plenty to start.
 - **RapidAPI / MatchStat plan limits** — Scores live uses the existing `RAPIDAPI_KEY`
   Worker secret (30s TTL). Leftover api-tennis.com routes still use `TENNIS_API_KEY`.

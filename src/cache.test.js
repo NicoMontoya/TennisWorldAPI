@@ -80,6 +80,20 @@ describe('cache.set fail-soft', () => {
         expect(env.store.has('tw:livescore2:ATP:all:stale')).toBe(false);
     });
 
+    it('setEdge does not throw when Cache API put fails', async () => {
+        globalThis.caches = {
+            default: {
+                async match() { return undefined; },
+                async put() { throw new Error('Cache API put failed'); },
+            },
+        };
+        const env = kvEnv();
+        await expect(cache.setEdge(30, [{ matchKey: '1' }], 'livescore3', 'ATP', 'all'))
+            .resolves.toBeUndefined();
+        expect([...env.store.keys()]).toEqual([]);
+        delete globalThis.caches;
+    });
+
     it('setEdge writes Cache API only and does not touch KV', async () => {
         const store = new Map();
         globalThis.caches = {
