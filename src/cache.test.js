@@ -19,6 +19,22 @@ function kvEnv({ put } = {}) {
                 if (put) return put(key, value);
                 store.set(key, value);
             },
+            async delete(key) {
+                store.delete(key);
+            },
+            async list({ prefix, cursor, limit = 1000 } = {}) {
+                const keys = [...store.keys()]
+                    .filter(k => !prefix || k.startsWith(prefix))
+                    .sort();
+                const start = cursor ? Number(cursor) : 0;
+                const slice = keys.slice(start, start + limit);
+                const next = start + slice.length;
+                return {
+                    keys: slice.map(name => ({ name })),
+                    list_complete: next >= keys.length,
+                    cursor: next < keys.length ? String(next) : undefined,
+                };
+            },
         },
     };
 }
@@ -118,5 +134,31 @@ describe('cache.set fail-soft', () => {
         const hit = await cache.get(env, 'livescore3', 'ATP', 'all', 'seen');
         expect(hit.data).toEqual([{ matchKey: '1' }]);
         delete globalThis.caches;
+    });
+});
+
+describe('cache.invalidatePrefix', () => {
+    afterEach(() => { delete globalThis.caches; });
+
+    it('deletes KV primary and :stale keys under the prefix, not siblings', async () => {
+        const env = kvEnv();
+        await cache.set(env, 300, { n: 10 }, 'h2h-v11', 'ATP', '47275', '68074');
+        await cache.set(env, 300, { n: 17 }, 'h2h-v11', 'ATP', '68074', '47275');
+        await cache.set(env, 300, { n: 1 }, 'h2h-v11', 'ATP', '472750', '1');
+
+        await cache.invalidatePrefix(env, 'h2h-v11', 'ATP', '47275');
+
+        expect(await cache.get(env, 'h2h-v11', 'ATP', '47275', '68074')).toBeNull();
+        expect(await cache.getStale(env, 'h2h-v11', 'ATP', '47275', '68074')).toBeNull();
+        expect((await cache.get(env, 'h2h-v11', 'ATP', '68074', '47275')).data).toEqual({ n: 17 });
+        expect((await cache.get(env, 'h2h-v11', 'ATP', '472750', '1')).data).toEqual({ n: 1 });
+    });
+
+    it('is a no-op when KV list is unavailable', async () => {
+        const env = kvEnv();
+        await cache.set(env, 300, { n: 10 }, 'h2h-v11', 'ATP', '47275', '68074');
+        delete env.TENNIS_CACHE.list;
+        await expect(cache.invalidatePrefix(env, 'h2h-v11', 'ATP', '47275')).resolves.toBeUndefined();
+        expect((await cache.get(env, 'h2h-v11', 'ATP', '47275', '68074')).data).toEqual({ n: 10 });
     });
 });
