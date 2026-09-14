@@ -1,6 +1,8 @@
 import { rapidAPI }                              from '../apiClient.js';
+import { cache }                                 from '../cache.js';
 import { readHistory, writeHistory, appendSnapshot, KV_MAX_ENTRIES } from './playerRankHistory.js';
 import { readMatchLog, writeMatchLog, mergeMatches } from './playerMatches.js';
+import { H2H_CACHE_VERSION }                     from './h2h.js';
 
 // GET /api/admin/backfill-rankings?tour=ATP|WTA&weeksBack=26&secret=XXX
 //
@@ -125,12 +127,19 @@ export async function handleImportMatches(request, env) {
     if (!tour || !logs) throw new Error('tour and logs are required');
 
     let written = 0, errors = 0;
+    const tourKey = String(tour).toUpperCase();
     for (const [playerKey, matches] of Object.entries(logs)) {
         try {
             const existing = await readMatchLog(env, tour, playerKey);
             const merged   = mergeMatches(existing, matches);
             await writeMatchLog(env, tour, playerKey, merged);
             written++;
+            // Drop ordered-pair H2H cache for this player as A (prefix list,
+            // existing keys only — not every career opponent). Fail-soft so a
+            // list/delete hiccup cannot fail a successful match-log write.
+            try {
+                await cache.invalidatePrefix(env, H2H_CACHE_VERSION, tourKey, playerKey);
+            } catch { /* fail-soft */ }
         } catch (e) {
             errors++;
         }

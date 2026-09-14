@@ -156,4 +156,33 @@ export const cache = {
         await env.TENNIS_CACHE.delete(key);
         try { await caches.default.delete(edgeUrl(key)); } catch { /* local dev */ }
     },
+
+    /**
+     * invalidatePrefix(env, ...keyParts)
+     * Lists KV keys under `tw:{parts}:` and deletes each (KV + edge). Also
+     * removes matching `:stale` backups. Fail-soft if list() is unavailable.
+     * Used after match-log import so ordered-pair H2H entries (A→opponents)
+     * for the imported player miss instead of serving a pre-import count.
+     */
+    async invalidatePrefix(env, ...keyParts) {
+        const prefix = `${buildKey(...keyParts)}:`;
+        if (typeof env.TENNIS_CACHE?.list !== 'function') return;
+
+        try {
+            let cursor;
+            do {
+                const page = await env.TENNIS_CACHE.list({ prefix, cursor, limit: 100 });
+                for (const entry of (page?.keys || [])) {
+                    const name = entry?.name;
+                    if (!name || !name.startsWith(prefix)) continue;
+                    try { await env.TENNIS_CACHE.delete(name); } catch { /* quota / transient */ }
+                    try { await caches.default.delete(edgeUrl(name)); } catch { /* local dev */ }
+                }
+                cursor = page?.list_complete === false ? page.cursor : undefined;
+            } while (cursor);
+        } catch {
+            // Static log only — do not dump keys (player ids) or the Error.
+            console.warn('[cache] prefix invalidate failed (list or delete)');
+        }
+    },
 };

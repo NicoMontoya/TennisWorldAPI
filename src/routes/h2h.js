@@ -1,7 +1,11 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
-import { readMatchLog } from './playerMatches.js';
+import { readMatchLog, mergeMatches } from './playerMatches.js';
+
+// Ordered-pair Cache API/KV namespace. Bump when H2H computation or match-log
+// coverage changes so both A→B and B→A miss stale pre-import entries.
+export const H2H_CACHE_VERSION = 'h2h-v11';
 
 // GET /api/h2h?playerKeyA=47275&playerKeyB=33648&tour=ATP
 //
@@ -204,8 +208,9 @@ export async function handleH2H(request, env) {
     if (!playerKeyA || !playerKeyB) throw new Error('playerKeyA and playerKeyB are required');
 
     // Cache key preserves A→B order so p1/p2 orientation is always consistent.
-    // v10 bumped when the KV-backed complete-history merge landed.
-    const cacheArgs = ['h2h-v10', tour, playerKeyA, playerKeyB];
+    // v11: drop stale ordered-pair entries after Sackmann match-log import
+    // (Alcaraz→Sinner recomputed; Sinner→Alcaraz was still serving a pre-import hit).
+    const cacheArgs = [H2H_CACHE_VERSION, tour, playerKeyA, playerKeyB];
 
     const cached = await cache.get(env, ...cacheArgs);
     if (cached) return cached.data;
@@ -223,12 +228,29 @@ export async function handleH2H(request, env) {
         ]);
 
         // ── Complete history from KV (Sackmann-backed) ───────────────────────────
-        const kvMatches = (kvLog || [])
-            .filter(m => String(m.opponentKey) === String(playerKeyB))
-            .map(m => transformKVMatch(m, playerKeyA, playerKeyB));
-
+        let kvOpp = (kvLog || []).filter(m => String(m.opponentKey) === String(playerKeyB));
         // A's most recent stored match date — the boundary past which we trust live.
-        const cutoff = (kvLog || []).reduce((mx, m) => (m.date > mx ? m.date : mx), '');
+        let cutoff = (kvLog || []).reduce((mx, m) => (m.date > mx ? m.date : mx), '');
+
+        // If A's match log is empty or has no meetings vs B, union B's log
+        // (flipped onto A's perspective) so one missed import can't truncate.
+        // TODO: also union when A has some meetings vs B but B has a longer
+        // series (partial/truncated A log); skipped to keep this change small.
+        if (!(kvLog || []).length || !kvOpp.length) {
+            const kvLogB = await readMatchLog(env, tour, playerKeyB).catch(() => []);
+            const fromB = (kvLogB || [])
+                .filter(m => String(m.opponentKey) === String(playerKeyA))
+                .map(m => ({
+                    ...m,
+                    opponentKey: String(playerKeyB),
+                    opponentName: '',
+                    won: !m.won,
+                }));
+            kvOpp = mergeMatches(kvOpp, fromB);
+            cutoff = (kvLogB || []).reduce((mx, m) => (m.date > mx ? m.date : mx), cutoff);
+        }
+
+        const kvMatches = kvOpp.map(m => transformKVMatch(m, playerKeyA, playerKeyB));
 
         // ── Live API — only matches newer than the Sackmann cutoff (no overlap) ──
         const allMatches = pastResult?.data || [];
