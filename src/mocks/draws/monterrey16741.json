@@ -1,0 +1,647 @@
+{
+  "tournamentKey": "16741",
+  "name": "Abierto GNP Seguros - Monterrey",
+  "capturedAt": "2026-09-20",
+  "note": "Raw matches as the draws route would pass to assignSlotOrder (synthetics/slotIndex stripped). Captured from production before the general-path fix.",
+  "rounds": [
+    {
+      "round": "Final",
+      "order": 1,
+      "matches": [
+        {
+          "matchKey": "871042",
+          "player1Name": "Diane Parry",
+          "player1Key": "51151",
+          "player2Name": "Elise Mertens",
+          "player2Key": "13351",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "0-6",
+            "6-3"
+          ],
+          "round": "Final",
+          "roundId": 12,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-29T00:00:00.000Z",
+          "player1Rank": 30,
+          "player2Rank": 19,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        }
+      ]
+    },
+    {
+      "round": "Semi-finals",
+      "order": 2,
+      "matches": [
+        {
+          "matchKey": "871064",
+          "player1Name": "Diane Parry",
+          "player1Key": "51151",
+          "player2Name": "Ann Li",
+          "player2Key": "45866",
+          "winner": "player1",
+          "setScores": [
+            "7-6(7)",
+            "6-4"
+          ],
+          "round": "Semi-finals",
+          "roundId": 10,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-28T00:00:00.000Z",
+          "player1Rank": 30,
+          "player2Rank": 29,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871076",
+          "player1Name": "Elise Mertens",
+          "player1Key": "13351",
+          "player2Name": "Nikola Bartunkova",
+          "player2Key": "71092",
+          "winner": "player1",
+          "setScores": [
+            "1-6",
+            "6-4",
+            "6-2"
+          ],
+          "round": "Semi-finals",
+          "roundId": 10,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-28T00:00:00.000Z",
+          "player1Rank": 19,
+          "player2Rank": 34,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        }
+      ]
+    },
+    {
+      "round": "Quarter-finals",
+      "order": 3,
+      "matches": [
+        {
+          "matchKey": "871057",
+          "player1Name": "Elise Mertens",
+          "player1Key": "13351",
+          "player2Name": "Yuliia Starodubtseva",
+          "player2Key": "41888",
+          "winner": "player1",
+          "setScores": [
+            "6-1",
+            "6-4"
+          ],
+          "round": "Quarter-finals",
+          "roundId": 9,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-27T00:00:00.000Z",
+          "player1Rank": 19,
+          "player2Rank": 43,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871063",
+          "player1Name": "Ann Li",
+          "player1Key": "45866",
+          "player2Name": "Alycia Parks",
+          "player2Key": "45540",
+          "winner": "player1",
+          "setScores": [
+            "6-2",
+            "6-3"
+          ],
+          "round": "Quarter-finals",
+          "roundId": 9,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-27T00:00:00.000Z",
+          "player1Rank": 29,
+          "player2Rank": 72,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871068",
+          "player1Name": "Diane Parry",
+          "player1Key": "51151",
+          "player2Name": "Clara Tauson",
+          "player2Key": "54989",
+          "winner": "player1",
+          "setScores": [
+            "6-3",
+            "7-5"
+          ],
+          "round": "Quarter-finals",
+          "roundId": 9,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-27T00:00:00.000Z",
+          "player1Rank": 30,
+          "player2Rank": 36,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871072",
+          "player1Name": "Nikola Bartunkova",
+          "player1Key": "71092",
+          "player2Name": "Darja Vidmanova",
+          "player2Key": "61710",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "6-7(3)",
+            "6-3"
+          ],
+          "round": "Quarter-finals",
+          "roundId": 9,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-27T00:00:00.000Z",
+          "player1Rank": 34,
+          "player2Rank": 86,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        }
+      ]
+    },
+    {
+      "round": "Round of 16",
+      "order": 4,
+      "matches": [
+        {
+          "matchKey": "871045",
+          "player1Name": "Clara Tauson",
+          "player1Key": "54989",
+          "player2Name": "Ekaterina Alexandrova",
+          "player2Key": "14054",
+          "winner": "player1",
+          "setScores": [
+            "7-6(6)",
+            "4-6",
+            "6-3"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-26T00:00:00.000Z",
+          "player1Rank": 36,
+          "player2Rank": 21,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871050",
+          "player1Name": "Darja Vidmanova",
+          "player1Key": "61710",
+          "player2Name": "Cristina Bucsa",
+          "player2Key": "24344",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "7-5"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-26T00:00:00.000Z",
+          "player1Rank": 86,
+          "player2Rank": 44,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871055",
+          "player1Name": "Nikola Bartunkova",
+          "player1Key": "71092",
+          "player2Name": "En Shuo Liang",
+          "player2Key": "39535",
+          "winner": "player1",
+          "setScores": [
+            "6-7(4)",
+            "7-5",
+            "6-4"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-26T00:00:00.000Z",
+          "player1Rank": 34,
+          "player2Rank": 288,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871058",
+          "player1Name": "Alycia Parks",
+          "player1Key": "45540",
+          "player2Name": "Maja Chwalinska",
+          "player2Key": "43323",
+          "winner": "player1",
+          "setScores": [
+            "3-6",
+            "6-2",
+            "6-2"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-26T00:00:00.000Z",
+          "player1Rank": 72,
+          "player2Rank": 26,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871060",
+          "player1Name": "Elise Mertens",
+          "player1Key": "13351",
+          "player2Name": "Panna Udvardy",
+          "player2Key": "43866",
+          "winner": "player1",
+          "setScores": [
+            "6-1",
+            "4-6",
+            "6-3"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-26T00:00:00.000Z",
+          "player1Rank": 19,
+          "player2Rank": 83,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871067",
+          "player1Name": "Diane Parry",
+          "player1Key": "51151",
+          "player2Name": "Oleksandra Oliynykova",
+          "player2Key": "51696",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "7-6(3)"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-25T00:00:00.000Z",
+          "player1Rank": 30,
+          "player2Rank": 41,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871070",
+          "player1Name": "Yuliia Starodubtseva",
+          "player1Key": "41888",
+          "player2Name": "Janice Tjen",
+          "player2Key": "60341",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "6-3"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-25T00:00:00.000Z",
+          "player1Rank": 43,
+          "player2Rank": 51,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        }
+      ]
+    },
+    {
+      "round": "Round of 32",
+      "order": 5,
+      "matches": [
+        {
+          "matchKey": "871048",
+          "player1Name": "Clara Tauson",
+          "player1Key": "54989",
+          "player2Name": "Renata Zarazua",
+          "player2Key": "18403",
+          "winner": "player1",
+          "setScores": [
+            "3-6",
+            "6-3",
+            "6-0"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-24T00:00:00.000Z",
+          "player1Rank": 36,
+          "player2Rank": 91,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871049",
+          "player1Name": "Darja Vidmanova",
+          "player1Key": "61710",
+          "player2Name": "Kimberly Birrell",
+          "player2Key": "18427",
+          "winner": "player1",
+          "setScores": [
+            "7-6(2)",
+            "6-3"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-25T00:00:00.000Z",
+          "player1Rank": 86,
+          "player2Rank": 56,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871052",
+          "player1Name": "Cristina Bucsa",
+          "player1Key": "24344",
+          "player2Name": "Anna Bondar",
+          "player2Key": "31728",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "6-3"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-25T00:00:00.000Z",
+          "player1Rank": 44,
+          "player2Rank": 69,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871074",
+          "player1Name": "Nikola Bartunkova",
+          "player1Key": "71092",
+          "player2Name": "Antonia Ruzic",
+          "player2Key": "65417",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "6-3"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-23T00:00:00.000Z",
+          "player1Rank": 34,
+          "player2Rank": 79,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871078",
+          "player1Name": "Alycia Parks",
+          "player1Key": "45540",
+          "player2Name": "Petra Marcinko",
+          "player2Key": "73203",
+          "winner": "player1",
+          "setScores": [
+            "2-6",
+            "6-4",
+            "6-4"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-24T00:00:00.000Z",
+          "player1Rank": 72,
+          "player2Rank": 75,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871077",
+          "player1Name": "Panna Udvardy",
+          "player1Key": "43866",
+          "player2Name": "Maya Joint",
+          "player2Key": "72414",
+          "winner": "player1",
+          "setScores": [
+            "7-6(5)",
+            "6-1"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-25T00:00:00.000Z",
+          "player1Rank": 83,
+          "player2Rank": 68,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871043",
+          "player1Name": "Diane Parry",
+          "player1Key": "51151",
+          "player2Name": "Donna Vekic",
+          "player2Key": "13498",
+          "winner": "player1",
+          "setScores": [
+            "6-7(5)",
+            "6-4",
+            "6-1"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-24T00:00:00.000Z",
+          "player1Rank": 30,
+          "player2Rank": 37,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871044",
+          "player1Name": "Oleksandra Oliynykova",
+          "player1Key": "51696",
+          "player2Name": "Mayar Sherif",
+          "player2Key": "13706",
+          "winner": "player1",
+          "setScores": [
+            "6-3",
+            "6-4"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-23T00:00:00.000Z",
+          "player1Rank": 41,
+          "player2Rank": 48,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871080",
+          "player1Name": "Yuliia Starodubtseva",
+          "player1Key": "41888",
+          "player2Name": "Lilli Tagger",
+          "player2Key": "79778",
+          "winner": "player1",
+          "setScores": [
+            "6-3",
+            "6-4"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-23T00:00:00.000Z",
+          "player1Rank": 43,
+          "player2Rank": 46,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871053",
+          "player1Name": "Janice Tjen",
+          "player1Key": "60341",
+          "player2Name": "Dayana Yastremska",
+          "player2Key": "37266",
+          "winner": "player1",
+          "setScores": [
+            "2-6",
+            "6-3",
+            "7-6(5)"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-24T00:00:00.000Z",
+          "player1Rank": 51,
+          "player2Rank": 110,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871039",
+          "player1Name": "Maria Timofeeva",
+          "player1Key": "60792",
+          "player2Name": "Shuai Zhang",
+          "player2Key": "4263",
+          "winner": "player1",
+          "setScores": [
+            "6-1",
+            "6-3"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-25T00:00:00.000Z",
+          "player1Rank": 87,
+          "player2Rank": 54,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        },
+        {
+          "matchKey": "871061",
+          "player1Name": "Ann Li",
+          "player1Key": "45866",
+          "player2Name": "Maria Camila Osorio Serrano",
+          "player2Key": "44040",
+          "winner": "player1",
+          "setScores": [
+            "6-1",
+            "6-2"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-08-24T00:00:00.000Z",
+          "player1Rank": 29,
+          "player2Rank": 63,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Abierto GNP Seguros - Monterrey"
+        }
+      ]
+    }
+  ]
+}

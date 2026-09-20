@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { assignSlotOrder, getBracketSlots } from './bracketSlots.js';
+
+const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'mocks/draws');
+function loadPeer(file) {
+    return JSON.parse(readFileSync(join(FIXTURES, file), 'utf8'));
+}
+function cloneRounds(data) {
+    return JSON.parse(JSON.stringify(data.rounds));
+}
 
 function mkMatch(partial) {
     return {
@@ -22,25 +33,27 @@ function hasPair(m, a, b) {
     return (n.some(s => s.includes(A)) && n.some(s => s.includes(B)));
 }
 
+function isReal(k) { return k != null && k !== '' && k !== 'null' && k !== 'undefined'; }
+
 function adjacentOk(earlier, later) {
     let ok = 0;
     for (let i = 0; i < later.length; i++) {
         const a = earlier[2 * i], b = earlier[2 * i + 1];
         if (!a || !b) continue;
-        const laterKeys = [later[i].player1Key, later[i].player2Key].map(String);
+        const laterKeys = [later[i].player1Key, later[i].player2Key].filter(isReal).map(String);
         const feedKeys = [];
         for (const m of [a, b]) {
-            if (m.winner === 'player1') feedKeys.push(String(m.player1Key));
-            else if (m.winner === 'player2') feedKeys.push(String(m.player2Key));
-            else {
-                if (m.player1Key) feedKeys.push(String(m.player1Key));
-                if (m.player2Key) feedKeys.push(String(m.player2Key));
-            }
+            if (m.winner === 'player1' && isReal(m.player1Key)) feedKeys.push(String(m.player1Key));
+            else if (m.winner === 'player2' && isReal(m.player2Key)) feedKeys.push(String(m.player2Key));
         }
-        const hits = laterKeys.filter(k => k && k !== 'null' && feedKeys.includes(k)).length;
-        if (hits >= 1) ok++;
+        const hits = laterKeys.filter(k => feedKeys.includes(k)).length;
+        if (laterKeys.length === 2 && hits === 2) ok++;
     }
     return ok;
+}
+
+function roundNamed(rounds, re) {
+    return rounds.find(r => re.test(r.round));
 }
 
 // Live Guadalajara 16745 first-round (12 real R32 matches; 4 byes unpublished)
@@ -212,11 +225,14 @@ describe('assignSlotOrder — no override (matchKey is not order)', () => {
         ];
     }
 
-    it('keeps first-round feed order (does not sort by matchKey)', () => {
+    it('does not treat matchKey as bracket order', () => {
         const rounds = assignSlotOrder(unverifiedDraw(), 'WTA', 'Hypothetical Open');
         const first = rounds.find(r => /16/i.test(r.round)).matches;
-        expect(first.map(m => m.player1Name).join('')).toBe('ABCDEFGH');
-        expect(first[0].matchKey).toBe('99');
+        // matchKey sort would put H (key 5) first. Backward layout places
+        // G then H — they meet in QF[0] — so H is not slot 0.
+        expect(first[0].player1Name).toBe('G');
+        expect(first[1].player1Name).toBe('H');
+        expect(first[0].matchKey).not.toBe('5');
         expect(rounds[0].slotOrderVerified).toBe(false);
     });
 
@@ -224,7 +240,64 @@ describe('assignSlotOrder — no override (matchKey is not order)', () => {
         const rounds = assignSlotOrder(unverifiedDraw(), 'WTA', 'Hypothetical Open');
         const r16 = rounds.find(r => /16/i.test(r.round)).matches;
         const qf = rounds.find(r => /quarter/i.test(r.round)).matches;
-        expect(qf.map(m => m.player1Name).join('')).toBe('ACEG');
         expect(adjacentOk(r16, qf)).toBe(4);
+    });
+
+    it('same general path works for an ATP-labelled draw (no ATP override)', () => {
+        const rounds = assignSlotOrder(unverifiedDraw(), 'ATP', 'Hypothetical Open');
+        const r16 = rounds.find(r => /16/i.test(r.round)).matches;
+        const qf = rounds.find(r => /quarter/i.test(r.round)).matches;
+        expect(rounds[0].slotOrderVerified).toBe(false);
+        expect(adjacentOk(r16, qf)).toBe(4);
+    });
+});
+
+describe('peer live draws — general path, no new overrides', () => {
+    function runPeer(file, tour = 'WTA') {
+        const data = loadPeer(file);
+        expect(getBracketSlots(data.name, 2026, tour)).toBeNull();
+        const rounds = assignSlotOrder(cloneRounds(data), tour, data.name);
+        const r16 = roundNamed(rounds, /16/i);
+        const qf = roundNamed(rounds, /quarter/i);
+        return { data, rounds, r16, qf };
+    }
+
+    it('Sao Paulo WTA 16746: adjacent R16→QF 4/4 without a BRACKET_SLOTS entry', () => {
+        const { rounds, r16, qf } = runPeer('saoPaulo16746.json');
+        expect(rounds[0].slotOrderVerified).toBe(false);
+        expect(r16.matches.length).toBe(8);
+        expect(qf.matches.length).toBe(4);
+        expect(adjacentOk(r16.matches, qf.matches)).toBe(4);
+    });
+
+    it('Monterrey WTA 16741: adjacent R16→QF 4/4 without a BRACKET_SLOTS entry', () => {
+        const { rounds, r16, qf } = runPeer('monterrey16741.json');
+        expect(rounds[0].slotOrderVerified).toBe(false);
+        expect(getBracketSlots('Abierto GNP Seguros - Monterrey', 2026, 'WTA')).toBeNull();
+        expect(qf.matches.length).toBe(4);
+        expect(r16.matches.length).toBe(8); // missing Li R16 inferred from leftover R32 winner
+        expect(adjacentOk(r16.matches, qf.matches)).toBe(4);
+    });
+
+    it('Guadalajara 16745 with override stays GREEN (verified, R16=8, adjacent 4/4)', () => {
+        const data = loadPeer('guadalajara16745.json');
+        expect(getBracketSlots(data.name, 2026, 'WTA')).toBeTruthy();
+        const rounds = assignSlotOrder(cloneRounds(data), 'WTA', data.name);
+        const r16 = roundNamed(rounds, /16/i);
+        const qf = roundNamed(rounds, /quarter/i);
+        expect(rounds[0].slotOrderVerified).toBe(true);
+        expect(r16.matches.length).toBe(8);
+        expect(r16.matches.some(m => hasPair(m, 'Kostyuk', 'Townsend'))).toBe(true);
+        expect(adjacentOk(r16.matches, qf.matches)).toBe(4);
+    });
+
+    it('Guadalajara-shaped WO also passes the GENERAL path (no override)', () => {
+        const data = loadPeer('guadalajara16745.json');
+        const rounds = assignSlotOrder(cloneRounds(data), 'WTA', 'Unlisted 500 Open');
+        const r16 = roundNamed(rounds, /16/i);
+        const qf = roundNamed(rounds, /quarter/i);
+        expect(rounds[0].slotOrderVerified).toBe(false);
+        expect(r16.matches.length).toBe(8);
+        expect(adjacentOk(r16.matches, qf.matches)).toBe(4);
     });
 });

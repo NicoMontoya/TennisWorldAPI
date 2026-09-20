@@ -177,8 +177,9 @@ export async function handleDraws(request, env) {
         name:         tournamentName,
         totalMatches: completedMatches.length,
         rounds,
-        // True only when BRACKET_SLOTS placed the first round. Otherwise
-        // slotIndex is parent-link / feed-relative, not the printed sheet.
+        // true  = emergency BRACKET_SLOTS override placed the printed sheet.
+        // false = general winner-tree layout (adjacent slots meet; not the
+        //         official printed order). Overrides are live-fire only.
         slotOrderVerified: rounds.some(r => r.slotOrderVerified),
     };
 

@@ -1,0 +1,642 @@
+{
+  "tournamentKey": "16745",
+  "name": "Guadalajara Open Akron - Guadalajara",
+  "capturedAt": "2026-09-20",
+  "note": "Raw matches as the draws route would pass to assignSlotOrder (synthetics/slotIndex stripped). Captured from production before the general-path fix.",
+  "rounds": [
+    {
+      "round": "Final",
+      "order": 1,
+      "matches": [
+        {
+          "matchKey": "56089735",
+          "player1Name": "Iva Jovic",
+          "player1Key": "80381",
+          "player2Name": "Peyton Stearns",
+          "player2Key": "53793",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "6-2"
+          ],
+          "round": "Final",
+          "roundId": 12,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-19T23:05:00.000Z",
+          "player1Rank": 16,
+          "player2Rank": 60,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        }
+      ]
+    },
+    {
+      "round": "Semi-finals",
+      "order": 2,
+      "matches": [
+        {
+          "matchKey": "25411875",
+          "player1Name": "Iva Jovic",
+          "player1Key": "80381",
+          "player2Name": "Cristina Bucsa",
+          "player2Key": "24344",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "6-1"
+          ],
+          "round": "Semi-finals",
+          "roundId": 10,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-18T23:00:00.000Z",
+          "player1Rank": 16,
+          "player2Rank": 44,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "29093121",
+          "player1Name": "Peyton Stearns",
+          "player1Key": "53793",
+          "player2Name": "Liudmila Samsonova",
+          "player2Key": "24368",
+          "winner": "player1",
+          "setScores": [
+            "7-6(7)",
+            "6-2"
+          ],
+          "round": "Semi-finals",
+          "roundId": 10,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-19T00:55:00.000Z",
+          "player1Rank": 60,
+          "player2Rank": 50,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        }
+      ]
+    },
+    {
+      "round": "Quarter-finals",
+      "order": 3,
+      "matches": [
+        {
+          "matchKey": "871467",
+          "player1Name": "Iva Jovic",
+          "player1Key": "80381",
+          "player2Name": "Magdalena Frech",
+          "player2Key": "17155",
+          "winner": "player1",
+          "setScores": [
+            "6-2",
+            "6-1"
+          ],
+          "round": "Quarter-finals",
+          "roundId": 9,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-17T20:30:00.000Z",
+          "player1Rank": 16,
+          "player2Rank": 57,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871478",
+          "player1Name": "Liudmila Samsonova",
+          "player1Key": "24368",
+          "player2Name": "Marta Kostyuk",
+          "player2Key": "47742",
+          "winner": "player1",
+          "setScores": [
+            "4-6",
+            "6-2",
+            "7-5"
+          ],
+          "round": "Quarter-finals",
+          "roundId": 9,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-17T23:10:00.000Z",
+          "player1Rank": 50,
+          "player2Rank": 10,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871490",
+          "player1Name": "Cristina Bucsa",
+          "player1Key": "24344",
+          "player2Name": "Sara Bejlek",
+          "player2Key": "71163",
+          "winner": "player1",
+          "setScores": [
+            "6-0",
+            "6-4"
+          ],
+          "round": "Quarter-finals",
+          "roundId": 9,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-17T19:00:00.000Z",
+          "player1Rank": 44,
+          "player2Rank": 28,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "2098410",
+          "player1Name": "Peyton Stearns",
+          "player1Key": "53793",
+          "player2Name": "Sloane Stephens",
+          "player2Key": "10033",
+          "winner": "player1",
+          "setScores": [
+            "7-6(6)",
+            "6-4"
+          ],
+          "round": "Quarter-finals",
+          "roundId": 9,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-18T02:35:00.000Z",
+          "player1Rank": 60,
+          "player2Rank": 169,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        }
+      ]
+    },
+    {
+      "round": "Round of 16",
+      "order": 4,
+      "matches": [
+        {
+          "matchKey": "871470",
+          "player1Name": "Magdalena Frech",
+          "player1Key": "17155",
+          "player2Name": "Caroline Dolehide",
+          "player2Key": "28585",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "6-3"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-16T19:10:00.000Z",
+          "player1Rank": 57,
+          "player2Rank": 246,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871471",
+          "player1Name": "Liudmila Samsonova",
+          "player1Key": "24368",
+          "player2Name": "Kayla Day",
+          "player2Key": "30510",
+          "winner": "player1",
+          "setScores": [
+            "7-6(4)",
+            "2-6",
+            "7-6(5)"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-17T00:45:00.000Z",
+          "player1Rank": 50,
+          "player2Rank": 123,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871475",
+          "player1Name": "Cristina Bucsa",
+          "player1Key": "24344",
+          "player2Name": "Panna Udvardy",
+          "player2Key": "43866",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "6-4"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-15T19:00:00.000Z",
+          "player1Rank": 44,
+          "player2Rank": 83,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871477",
+          "player1Name": "Sara Bejlek",
+          "player1Key": "71163",
+          "player2Name": "Alycia Parks",
+          "player2Key": "45540",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "6-3"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-15T20:50:00.000Z",
+          "player1Rank": 28,
+          "player2Rank": 72,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871479",
+          "player1Name": "Iva Jovic",
+          "player1Key": "80381",
+          "player2Name": "Zeynep Sonmez",
+          "player2Key": "49991",
+          "winner": "player1",
+          "setScores": [
+            "7-6(5)",
+            "6-4"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-16T21:00:00.000Z",
+          "player1Rank": 16,
+          "player2Rank": 58,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871480",
+          "player1Name": "Peyton Stearns",
+          "player1Key": "53793",
+          "player2Name": "Diane Parry",
+          "player2Key": "51151",
+          "winner": "player1",
+          "setScores": [
+            "6-2",
+            "7-5"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-15T23:05:00.000Z",
+          "player1Rank": 60,
+          "player2Rank": 30,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871484",
+          "player1Name": "Sloane Stephens",
+          "player1Key": "10033",
+          "player2Name": "Janice Tjen",
+          "player2Key": "60341",
+          "winner": "player1",
+          "setScores": [
+            "7-6(4)",
+            "7-6(3)"
+          ],
+          "round": "Round of 16",
+          "roundId": 7,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-16T01:05:00.000Z",
+          "player1Rank": 169,
+          "player2Rank": 51,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        }
+      ]
+    },
+    {
+      "round": "Round of 32",
+      "order": 5,
+      "matches": [
+        {
+          "matchKey": "871466",
+          "player1Name": "Magdalena Frech",
+          "player1Key": "17155",
+          "player2Name": "Nao Hibino",
+          "player2Key": "13937",
+          "winner": "player1",
+          "setScores": [
+            "6-1",
+            "6-4"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-14T23:40:00.000Z",
+          "player1Rank": 57,
+          "player2Rank": 199,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871468",
+          "player1Name": "Caroline Dolehide",
+          "player1Key": "28585",
+          "player2Name": "Renata Zarazua",
+          "player2Key": "18403",
+          "winner": "player1",
+          "setScores": [
+            "6-1",
+            "3-6",
+            "6-3"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-14T21:15:00.000Z",
+          "player1Rank": 246,
+          "player2Rank": 91,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871482",
+          "player1Name": "Liudmila Samsonova",
+          "player1Key": "24368",
+          "player2Name": "Elsa Jacquemot",
+          "player2Key": "57147",
+          "winner": "player1",
+          "setScores": [
+            "7-6(6)",
+            "6-2"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-15T00:35:00.000Z",
+          "player1Rank": 50,
+          "player2Rank": 156,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871481",
+          "player1Name": "Kayla Day",
+          "player1Key": "30510",
+          "player2Name": "Elvina Kalieva",
+          "player2Key": "55186",
+          "winner": "player1",
+          "setScores": [
+            "7-6(9)",
+            "6-4"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-14T18:05:00.000Z",
+          "player1Rank": 123,
+          "player2Rank": 113,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871473",
+          "player1Name": "Cristina Bucsa",
+          "player1Key": "24344",
+          "player2Name": "Bianca Vanessa Andreescu",
+          "player2Key": "39226",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "6-3"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-13T23:30:00.000Z",
+          "player1Rank": 44,
+          "player2Rank": 164,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871485",
+          "player1Name": "Panna Udvardy",
+          "player1Key": "43866",
+          "player2Name": "Lois Boisson",
+          "player2Key": "60758",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "6-7(6)",
+            "6-2"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-13T20:35:00.000Z",
+          "player1Rank": 83,
+          "player2Rank": 227,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871458",
+          "player1Name": "Alycia Parks",
+          "player1Key": "45540",
+          "player2Name": "Varvara Lepchenko",
+          "player2Key": "461",
+          "winner": "player1",
+          "setScores": [
+            "6-3",
+            "1-6",
+            "7-5"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-13T18:45:00.000Z",
+          "player1Rank": 72,
+          "player2Rank": 179,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871469",
+          "player1Name": "Zeynep Sonmez",
+          "player1Key": "49991",
+          "player2Name": "Iryna Shymanovich",
+          "player2Key": "18454",
+          "winner": "player1",
+          "setScores": [
+            "6-1",
+            "6-1"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-14T23:20:00.000Z",
+          "player1Rank": 58,
+          "player2Rank": 197,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871474",
+          "player1Name": "Peyton Stearns",
+          "player1Key": "53793",
+          "player2Name": "Emiliana Arango",
+          "player2Key": "39540",
+          "winner": "player1",
+          "setScores": [
+            "6-3",
+            "6-2"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-13T19:05:00.000Z",
+          "player1Rank": 60,
+          "player2Rank": 139,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871476",
+          "player1Name": "Sloane Stephens",
+          "player1Key": "10033",
+          "player2Name": "Carole Monnet",
+          "player2Key": "45536",
+          "winner": "player1",
+          "setScores": [
+            "6-4",
+            "7-6(5)"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-14T19:05:00.000Z",
+          "player1Rank": 169,
+          "player2Rank": 215,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871486",
+          "player1Name": "Janice Tjen",
+          "player1Key": "60341",
+          "player2Name": "Darja Vidmanova",
+          "player2Key": "61710",
+          "winner": "player1",
+          "setScores": [
+            "7-6(6)",
+            "6-2"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-13T21:10:00.000Z",
+          "player1Rank": 51,
+          "player2Rank": 86,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        },
+        {
+          "matchKey": "871459",
+          "player1Name": "Taylor Townsend",
+          "player1Key": "13621",
+          "player2Name": "Tatjana Maria",
+          "player2Key": "4110",
+          "winner": "player1",
+          "setScores": [
+            "6-7(0)",
+            "6-3",
+            "6-2"
+          ],
+          "round": "Round of 32",
+          "roundId": 6,
+          "status": "Finished",
+          "isLive": false,
+          "date": "2026-09-14T21:05:00.000Z",
+          "player1Rank": 98,
+          "player2Rank": 80,
+          "player1Seed": null,
+          "player2Seed": null,
+          "eventType": "WTA Singles",
+          "tournamentName": "Guadalajara Open Akron - Guadalajara"
+        }
+      ]
+    }
+  ]
+}
