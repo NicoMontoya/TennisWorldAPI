@@ -68,7 +68,7 @@ export async function handleDraws(request, env) {
     const tournamentKey = parseTournamentKey(searchParams.get('tournamentKey'), { required: true });
     const tour = parseTour(searchParams.get('tour'));
 
-    const cacheKey = ['draws12', tournamentKey, tour];
+    const cacheKey = ['draws13', tournamentKey, tour];
     const cached   = await cache.get(env, ...cacheKey);
     if (cached) return cached.data;
 
@@ -177,6 +177,9 @@ export async function handleDraws(request, env) {
         name:         tournamentName,
         totalMatches: completedMatches.length,
         rounds,
+        // True only when BRACKET_SLOTS placed the first round. Otherwise
+        // slotIndex is parent-link / feed-relative, not the printed sheet.
+        slotOrderVerified: rounds.some(r => r.slotOrderVerified),
     };
 
     // ── Adaptive cache TTL ────────────────────────────────────────────────────
