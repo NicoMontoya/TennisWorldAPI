@@ -68,7 +68,7 @@ export async function handleDraws(request, env) {
     const tournamentKey = parseTournamentKey(searchParams.get('tournamentKey'), { required: true });
     const tour = parseTour(searchParams.get('tour'));
 
-    const cacheKey = ['draws12', tournamentKey, tour];
+    const cacheKey = ['draws13', tournamentKey, tour];
     const cached   = await cache.get(env, ...cacheKey);
     if (cached) return cached.data;
 
@@ -177,6 +177,10 @@ export async function handleDraws(request, env) {
         name:         tournamentName,
         totalMatches: completedMatches.length,
         rounds,
+        // true  = emergency BRACKET_SLOTS override placed the printed sheet.
+        // false = general winner-tree layout (adjacent slots meet; not the
+        //         official printed order). Overrides are live-fire only.
+        slotOrderVerified: rounds.some(r => r.slotOrderVerified),
     };
 
     // ── Adaptive cache TTL ────────────────────────────────────────────────────
