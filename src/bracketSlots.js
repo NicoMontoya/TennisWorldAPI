@@ -13,16 +13,24 @@
 // feeders (walkovers, unpublished byes) are filled only from real leftover
 // winners or an honest BYE — no invented player names.
 //
-// OVERRIDES are emergency-only for live fires when the printed sheet must
-// win (Guadalajara 2026 WTA). slotOrderVerified is true only then.
+// slotOrderVerified is true when an official draw record matches the live
+// first round, or — emergencies only — a BRACKET_SLOTS override. A record
+// that no longer matches falls back to the winner-tree walk and stays
+// unverified. A record that contradicts played sections is not applied.
 
 const BRACKET_SLOTS = {"us open|2026|ATP": [["Zverev", "Sonego"], ["Halys", "Diaz Acosta"], ["Dimitrov", "Popyrin"], ["Hanfmann", "Tabilo"], ["Darderi", "Wendelken"], ["Svrcina", "Royer"], ["Sweeny", "Moutet"], ["Fery", "Musetti"], ["Jodar", "Kokkinakis"], ["Marozsan", "Zheng"], ["Svajda", "Altmaier"], ["Cerundolo", "Ruud"], ["Bergs", "Taberner"], ["de Jong", "Passaro"], ["Choinski", "van de Zandschulp"], ["Guerrieri", "de Minaur"], ["Auger-Aliassime", "Hijikata"], ["Burruchaga", "Khachanov"], ["Molcan", "Bonzi"], ["Giron", "Buse"], ["Mensik", "Mochizuki"], ["Rodionov", "Mpetshi Perricard"], ["Vallejo", "Monfils"], ["Borges", "Tien"], ["Fritz", "Dar Blanch"], ["Bellucci", "Piros"], ["Ugo Carabelli", "Struff"], ["Misolic", "Cerundolo"], ["Blockx", "Barrios Vera"], ["Shang", "Trungelliti"], ["Basavareddy", "Schoolkate"], ["Comesana", "Cobolli"], ["Medvedev", "Gaston"], ["Gorzny", "Collignon"], ["Munar", "Atmane"], ["Shimabukuro", "Rinderknech"], ["Vacherot", "Kovacevic"], ["Majchrzak", "Medjedovic"], ["Vukic", "Sakamoto"], ["Damm", "Tiafoe"], ["Nakashima", "Baez"], ["Michelsen", "Cina"], ["Merida", "Fucsovics"], ["Cilic", "Rublev"], ["Etcheverry", "Kopriva"], ["Landaluce", "Fearnley"], ["Berrettini", "Wawrinka"], ["Navone", "Djokovic"], ["Shelton", "Griekspoor"], ["Dzumhur", "Hurkacz"], ["Kecmanovic", "Shapovalov"], ["Van Assche", "Norrie"], ["Lehecka", "Carreno Busta"], ["Samuel", "Machac"], ["Harris", "Kennedy"], ["Tsitsipas", "Fils"], ["Bublik", "Wolf"], ["Tirante", "Mannarino"], ["Prizmic", "Shevchenko"], ["Wong", "Paul"], ["Arnaldi", "Duckworth"], ["Wu", "Walton"], ["Faria", "Brooksby"], ["Safiullin", "Alcaraz"]], "washington|2026|ATP": [["De Minaur", "Tsitsipas"], ["Giron", "Hewitt"], ["Nakashima", "Etcheverry"], ["Svajda", "Mensik"], ["Fritz", "Bergs"], ["Majchrzak", "Paul"], ["Michelsen", "Draper"], ["Mannarino", "Tien"], ["Fils", "Jodar"], ["Nishikori", "Shang"], ["Vukic", "Svajda"], ["Arnaldi", "Musetti"], ["Tiafoe", "Atmane"], ["Tabilo", "Griekspoor"], ["Humbert", "Martin"], ["Damm", "Shelton"]], "wimbledon|2026|ATP": [["Sinner", "Kecmanovic"], ["Borges", "Boyer"], ["Vukic", "Brooksby"], ["Nava", "Buse"], ["Jodar", "Gill"], ["Shapovalov", "Carreno Busta"], ["Mochizuki", "Basing"], ["Quinn", "Darderi"], ["Ruud", "Hurkacz"], ["Medjedovic", "Ofner"], ["Kwon", "Landaluce"], ["Muller", "Paul"], ["Nakashima", "Pinnington Jones"], ["Struff", "Baez"], ["Ugo Carabelli", "Merida"], ["Cilic", "Medvedev"], ["Auger-Aliassime", "Shevchenko"], ["Walton", "Prizmic"], ["Vallejo", "Mejia"], ["Zheng", "Norrie"], ["Davidovich Fokina", "Cerundolo"], ["Tirante", "Marozsan"], ["Van Assche", "Fucsovics"], ["Svrcina", "Tien"], ["Rublev", "Safiullin"], ["Kovacevic", "van de Zandschulp"], ["de Jong", "Hijikata"], ["Bautista Agut", "Fonseca"], ["Rinderknech", "Tarvet"], ["Trungelliti", "Damm"], ["Gaston", "Tsitsipas"], ["Wu", "Djokovic"], ["de Minaur", "Burruchaga"], ["Mannarino", "Droguet"], ["Llamas Ruiz", "Svajda"], ["Majchrzak", "Tabilo"], ["Khachanov", "Harris"], ["Hanfmann", "Mpetshi Perricard"], ["Griekspoor", "Duckworth"], ["Navone", "Cobolli"], ["Mensik", "Samuel"], ["Sweeny", "Dimitrov"], ["Wawrinka", "Berrettini"], ["Collignon", "Fils"], ["Humbert", "Bergs"], ["Shimabukuro", "Faria"], ["Dzumhur", "Fery"], ["Virtanen", "Shelton"], ["Fritz", "Lajovic"], ["Kypson", "McDonald"], ["Bonzi", "Diallo"], ["Sonego", "Etcheverry"], ["Tiafoe", "Atmane"], ["Kopriva", "Choinski"], ["Jacquet", "Gaubas"], ["Kokkinakis", "Bublik"], ["Lehecka", "Popyrin"], ["Molcan", "Altmaier"], ["Michelsen", "Fearnley"], ["Munar", "Cerundolo"], ["Arnaldi", "Halys"], ["Moutet", "Giron"], ["Royer", "Wendelken"], ["Blockx", "Zverev"]], "french open|2026|ATP": [["Sinner", "Tabur"], ["Fearnley", "Cerundolo J"], ["Landaluce", "Prado Angelo"], ["Kopriva", "Moutet"], ["Rinderknech", "Rodionov"], ["Fucsovics", "Berrettini"], ["Quinn", "Comesana"], ["Ofner", "Darderi"], ["Bublik", "Struff"], ["Faria", "Shapovalov"], ["Munar", "Hurkacz"], ["Spizzirri", "Tiafoe"], ["Griekspoor", "Arnaldi"], ["Muller", "Tsitsipas"], ["Collignon", "Vukic"], ["Merida", "Shelton"], ["Auger Aliassime", "Altmaier"], ["Baez", "Burruchaga"], ["Van Assche", "Kypson"], ["Bautista Agut", "Nakashima"], ["Norrie", "Vallejo"], ["Cilic", "Kouame"], ["Tabilo", "Majchrzak"], ["Faurel", "Vacherot"], ["Cobolli", "Pellegrino"], ["Wu", "Giron"], ["Diaz Acosta", "Zhang"], ["Garin", "Tien"], ["Cerundolo F", "Van De Zandschulp"], ["Gaston", "Monfils"], ["Popyrin", "Svajda"], ["Walton", "Medvedev"], ["De Minaur", "Samuel"], ["Blockx", "Wong"], ["Navone", "Brooksby"], ["Droguet", "Mensik"], ["Etcheverry", "Borges"], ["Kecmanovic", "Marozsan"], ["Nava", "Ugo Carabelli"], ["Buse", "Rublev"], ["Ruud", "Safiullin"], ["Medjedovic", "Hanfmann"], ["Sonego", "Herbert"], ["Hijikata", "Paul"], ["Fonseca", "Pavlovic"], ["Zheng", "Prizmic"], ["Dellien", "Royer"], ["Mpetshi Perricard", "Djokovic"], ["Fritz", "Basavareddy"], ["Shevchenko", "Michelsen"], ["Duckworth", "Diallo"], ["Kovacevic", "Jodar"], ["Davidovich Fokina", "Dzumhur"], ["Llamas Ruiz", "Tirante"], ["Kokkinakis", "Atmane"], ["Carreno Busta", "Lehecka"], ["Khachanov", "Gea"], ["Jacquet", "Trungelliti"], ["Cina", "Opelka"], ["Wawrinka", "De Jong"], ["Humbert", "Mannarino"], ["Halys", "Bellucci"], ["Machac", "Bergs"], ["Bonzi", "Zverev"]], "roland garros|2026|ATP": [["Sinner", "Tabur"], ["Fearnley", "Cerundolo J"], ["Landaluce", "Prado Angelo"], ["Kopriva", "Moutet"], ["Rinderknech", "Rodionov"], ["Fucsovics", "Berrettini"], ["Quinn", "Comesana"], ["Ofner", "Darderi"], ["Bublik", "Struff"], ["Faria", "Shapovalov"], ["Munar", "Hurkacz"], ["Spizzirri", "Tiafoe"], ["Griekspoor", "Arnaldi"], ["Muller", "Tsitsipas"], ["Collignon", "Vukic"], ["Merida", "Shelton"], ["Auger Aliassime", "Altmaier"], ["Baez", "Burruchaga"], ["Van Assche", "Kypson"], ["Bautista Agut", "Nakashima"], ["Norrie", "Vallejo"], ["Cilic", "Kouame"], ["Tabilo", "Majchrzak"], ["Faurel", "Vacherot"], ["Cobolli", "Pellegrino"], ["Wu", "Giron"], ["Diaz Acosta", "Zhang"], ["Garin", "Tien"], ["Cerundolo F", "Van De Zandschulp"], ["Gaston", "Monfils"], ["Popyrin", "Svajda"], ["Walton", "Medvedev"], ["De Minaur", "Samuel"], ["Blockx", "Wong"], ["Navone", "Brooksby"], ["Droguet", "Mensik"], ["Etcheverry", "Borges"], ["Kecmanovic", "Marozsan"], ["Nava", "Ugo Carabelli"], ["Buse", "Rublev"], ["Ruud", "Safiullin"], ["Medjedovic", "Hanfmann"], ["Sonego", "Herbert"], ["Hijikata", "Paul"], ["Fonseca", "Pavlovic"], ["Zheng", "Prizmic"], ["Dellien", "Royer"], ["Mpetshi Perricard", "Djokovic"], ["Fritz", "Basavareddy"], ["Shevchenko", "Michelsen"], ["Duckworth", "Diallo"], ["Kovacevic", "Jodar"], ["Davidovich Fokina", "Dzumhur"], ["Llamas Ruiz", "Tirante"], ["Kokkinakis", "Atmane"], ["Carreno Busta", "Lehecka"], ["Khachanov", "Gea"], ["Jacquet", "Trungelliti"], ["Cina", "Opelka"], ["Wawrinka", "De Jong"], ["Humbert", "Mannarino"], ["Halys", "Bellucci"], ["Machac", "Bergs"], ["Bonzi", "Zverev"]]};
 
-// Guadalajara Open Akron 2026 WTA — 28-draw (4 byes). Official top→bottom
-// order from wtatennis.com/tournaments/2075/guadalajara-500/2026/draws.
-// Tokens are live /api/draws?tournamentKey=16745&season=2026&tour=WTA
-// first-round surnames so findPairIndex hits; BYE only on printed byes.
-// Kostyuk's R32 bye is not in the feed (she appears first at R16 via WO).
+import { relabelByDepth, expandByes } from './bracketStructure.js';
+import {
+    validateOfficialRecord,
+    planFirstRound,
+    sectionConflict,
+    slotSideId,
+} from './officialDraw.js';
+
+// Guadalajara Open Akron 2026 WTA — kept as the one emergency hand table
+// until an official-draw record is stored for 16745. A matching record
+// supersedes this list. A stale record does not fall back to it.
 BRACKET_SLOTS['guadalajara|2026|WTA'] = [
     ['Kostyuk', 'BYE'],
     ['Maria', 'Townsend'],
@@ -41,8 +49,6 @@ BRACKET_SLOTS['guadalajara|2026|WTA'] = [
     ['Sonmez', 'Shymanovich'],
     ['BYE', 'Jovic'],
 ];
-
-import { relabelByDepth, expandByes } from './bracketStructure.js';
 
 const lettersOnly = s => (s || '').toLowerCase().replace(/[^a-z]/g, '');
 
@@ -496,21 +502,136 @@ function layoutTreeFromLatest(rounds) {
     }
 }
 
+function flipSetScore(score) {
+    const m = String(score).match(/^(\d+)-(\d+)(.*)$/);
+    if (!m) return score;
+    return `${m[2]}-${m[1]}${m[3]}`;
+}
+
+function swapSides(m) {
+    const swapped = { ...m };
+    for (const field of ['Name', 'Key', 'Seed', 'Rank']) {
+        swapped[`player1${field}`] = m[`player2${field}`];
+        swapped[`player2${field}`] = m[`player1${field}`];
+    }
+    if (m.winner === 'player1') swapped.winner = 'player2';
+    else if (m.winner === 'player2') swapped.winner = 'player1';
+    if (Array.isArray(m.setScores)) swapped.setScores = m.setScores.map(flipSetScore);
+    return swapped;
+}
+
+function orientMatch(m, top, bot) {
+    const a = slotSideId(m, 'player1');
+    const b = slotSideId(m, 'player2');
+    if (a === top && b === bot) return m;
+    if (a === bot && b === top) return swapSides(m);
+    return m;
+}
+
+function nameForId(rounds, id) {
+    for (const r of rounds) {
+        for (const m of r.matches) {
+            if (String(m.player1Key) === String(id) && m.player1Name && !isByeName(m.player1Name)) {
+                return m.player1Name;
+            }
+            if (String(m.player2Key) === String(id) && m.player2Name && !isByeName(m.player2Name)) {
+                return m.player2Name;
+            }
+        }
+    }
+    return null;
+}
+
+function commitOverride(rounds, first, pairs) {
+    const template = first.matches[0];
+    const filled   = new Array(pairs.length).fill(null);
+    const claimed  = new Set();
+
+    for (const m of first.matches) {
+        const idx = findPairIndex(pairs, m.player1Name, m.player2Name);
+        if (idx >= 0 && !filled[idx]) { filled[idx] = m; claimed.add(m); }
+    }
+    for (let i = 0; i < filled.length; i++) {
+        if (!filled[i]) filled[i] = synthFirstRoundMatch(pairs[i], template, i);
+    }
+    const unmapped = first.matches.filter(m => !claimed.has(m));
+    first.matches = filled.concat(unmapped);
+    enrichSynthKeysFromLater(first, rounds);
+    const leaves = leafCount(rounds, pairs);
+    expandByes(rounds, leaves);
+    // Printed first round is the root — walk FORWARD so that order wins.
+    placeLaterFromParents(rounds);
+}
+
+function commitOfficial(rounds, first, plan) {
+    const template = first.matches.find(m => m) || first.matches[0];
+    const filled = [];
+    for (let i = 0; i < plan.entries.length; i++) {
+        const entry = plan.entries[i];
+        if (entry.matchIndex >= 0) {
+            filled.push(orientMatch(first.matches[entry.matchIndex], entry.top, entry.bot));
+            continue;
+        }
+        const p1 = entry.top === 'BYE' ? 'BYE' : nameForId(rounds, entry.top);
+        const p2 = entry.bot === 'BYE' ? 'BYE' : nameForId(rounds, entry.bot);
+        if (!p1 || !p2) return false;
+        const synth = synthFirstRoundMatch([p1, p2], template, i);
+        if (entry.top !== 'BYE') synth.player1Key = entry.top;
+        if (entry.bot !== 'BYE') synth.player2Key = entry.bot;
+        filled.push(synth);
+    }
+    first.matches = filled;
+    enrichSynthKeysFromLater(first, rounds);
+    const leaves = leafCount(rounds, null);
+    expandByes(rounds, leaves);
+    placeLaterFromParents(rounds);
+    return true;
+}
+
+function runGeneral(rounds) {
+    leafCount(rounds, null);
+    // Latest-round pairing is the root — walk BACKWARD so children are
+    // adjacent even when first-round feed order is scrambled.
+    layoutTreeFromLatest(rounds);
+    const leaves = leafCount(rounds, null);
+    expandByes(rounds, leaves);
+}
+
+// 'apply' | 'mismatch' | 'stale'. A record that fails its own checksum, or
+// whose players are no longer the live first round, is stale — never verified.
+// Mismatch means the players still match but a played match crosses sections.
+function decideOfficial(rounds, first, officialRecord) {
+    const validated = validateOfficialRecord(officialRecord);
+    if (!validated.ok) return { action: 'stale' };
+    const plan = planFirstRound(first.matches, validated.record.slots);
+    if (!plan.ok) return { action: 'stale' };
+    for (const entry of plan.entries) {
+        if (entry.matchIndex >= 0) continue;
+        const id = entry.top === 'BYE' ? entry.bot : entry.top;
+        if (!nameForId(rounds, id)) return { action: 'stale' };
+    }
+    if (sectionConflict(rounds, first, validated.record.slots)) return { action: 'mismatch' };
+    const { tour, sourceHost, checkedAt } = validated.record;
+    return { action: 'apply', plan, verification: { tour, sourceHost, checkedAt } };
+}
+
 /**
- * assignSlotOrder(rounds, tour, tournamentName):
+ * assignSlotOrder(rounds, tour, tournamentName, officialRecord?):
  * orders each round and stamps `slotIndex` on every match.
  *
- * slotOrderVerified === true  only when a BRACKET_SLOTS emergency override
- * placed the first round in printed-draw order. Overrides are live-fire only.
+ * slotOrderVerified === true when an official record was applied, or when an
+ * emergency BRACKET_SLOTS override placed the first round. A present record
+ * suppresses the override: stale and structural-mismatch records stay
+ * unverified (mismatch also sets slotOrderMismatch for the red chip).
  *
- * slotOrderVerified === false  on the general path: slotIndex is a consistent
- * binary-tree layout derived from winner→parent links (adjacent slots meet
- * next round) but is NOT claimed as the official printed sheet. matchKey is
- * never treated as bracket order.
+ * slotOrderVerified === false on the general path: slotIndex is a consistent
+ * binary tree from winner→parent links, not the printed sheet. matchKey is
+ * never bracket order.
  *
- * Mutates in place; returns rounds.
+ * Mutates in place; returns rounds. On a verified record,
+ * rounds.slotOrderVerification is { tour, sourceHost, checkedAt }.
  */
-export function assignSlotOrder(rounds, tour, tournamentName) {
+export function assignSlotOrder(rounds, tour, tournamentName, officialRecord) {
     if (!rounds || !rounds.length) return rounds;
 
     // First (earliest) elimination round = highest `order` value.
@@ -526,39 +647,41 @@ export function assignSlotOrder(rounds, tour, tournamentName) {
 
     // Do not sort by matchKey — it is not official bracket order.
 
-    const pairs = getBracketSlots(tournamentName, year, tour);
-    const verified = !!(pairs && first.matches.length);
-    if (verified) {
-        const template = first.matches[0];
-        const filled   = new Array(pairs.length).fill(null);
-        const claimed  = new Set();
+    let verified = false;
+    let mismatch = false;
+    let verification = null;
 
-        for (const m of first.matches) {
-            const idx = findPairIndex(pairs, m.player1Name, m.player2Name);
-            if (idx >= 0 && !filled[idx]) { filled[idx] = m; claimed.add(m); }
+    if (officialRecord) {
+        const decision = decideOfficial(rounds, first, officialRecord);
+        if (decision.action === 'apply' && commitOfficial(rounds, first, decision.plan)) {
+            verified = true;
+            verification = decision.verification;
+        } else if (decision.action === 'mismatch') {
+            runGeneral(rounds);
+            mismatch = true;
+        } else {
+            // Stale or unreadable record. Do not fall through to a hand
+            // override — that would keep "verified" on a sheet we no longer
+            // trust.
+            runGeneral(rounds);
         }
-        for (let i = 0; i < filled.length; i++) {
-            if (!filled[i]) filled[i] = synthFirstRoundMatch(pairs[i], template, i);
-        }
-        const unmapped = first.matches.filter(m => !claimed.has(m));
-        first.matches = filled.concat(unmapped);
-        enrichSynthKeysFromLater(first, rounds);
-        const leaves = leafCount(rounds, pairs);
-        expandByes(rounds, leaves);
-        // Official first-round is the root — walk FORWARD so printed order wins.
-        placeLaterFromParents(rounds);
     } else {
-        leafCount(rounds, null);
-        // Latest-round pairing is the root — walk BACKWARD so children are
-        // adjacent even when first-round feed order is scrambled.
-        layoutTreeFromLatest(rounds);
-        const leaves = leafCount(rounds, null);
-        expandByes(rounds, leaves);
+        const pairs = getBracketSlots(tournamentName, year, tour);
+        if (pairs && first.matches.length) {
+            commitOverride(rounds, first, pairs);
+            verified = true;
+        } else {
+            runGeneral(rounds);
+        }
     }
 
     for (const r of rounds) {
         r.matches.forEach((m, i) => { m.slotIndex = i; });
         r.slotOrderVerified = verified;
+        if (mismatch) r.slotOrderMismatch = true;
+        else delete r.slotOrderMismatch;
     }
+    if (verification) rounds.slotOrderVerification = verification;
+    else delete rounds.slotOrderVerification;
     return rounds;
 }

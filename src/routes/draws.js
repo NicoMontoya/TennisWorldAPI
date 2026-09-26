@@ -3,6 +3,7 @@ import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
 import { assignSlotOrder } from '../bracketSlots.js';
 import { parseTour, parseTournamentKey } from '../security.js';
+import { DRAWS_CACHE_RESOURCE, readOfficialDraw } from '../officialDraw.js';
 
 // roundId → { name, order } (order 1 = Final, higher = earlier round)
 const ROUND = {
@@ -60,15 +61,43 @@ function stripPhantomFixtures(rounds) {
     return rounds.filter(r => r.matches.length > 0);
 }
 
+function drawSeason(searchParams, rounds) {
+    const q = String(searchParams.get('season') || '').trim();
+    if (/^\d{4}$/.test(q)) return q;
+    for (const r of rounds || []) {
+        for (const m of r.matches || []) {
+            const y = String(m.date || '').slice(0, 4);
+            if (/^\d{4}$/.test(y)) return y;
+        }
+    }
+    return '';
+}
+
+export function drawOrderFields(rounds) {
+    const slotOrderVerified = !!(rounds && rounds.some(r => r.slotOrderVerified === true));
+    const slotOrderMismatch = !!(rounds && rounds.some(r => r.slotOrderMismatch === true));
+    const fields = { slotOrderVerified };
+    if (slotOrderMismatch) fields.slotOrderMismatch = true;
+    if (slotOrderVerified && rounds.slotOrderVerification) {
+        fields.slotOrderVerification = rounds.slotOrderVerification;
+    }
+    return fields;
+}
+
 // GET /api/draws?tournamentKey=XXXX&season=YYYY
 // tournamentKey is the new RapidAPI tournament id.
-// season is ignored (new API returns full history per tournament id).
+// season selects the official-draw record (tournamentKey + season). The
+// upstream feed itself is already one edition per tournament id.
 export async function handleDraws(request, env) {
     const { searchParams } = new URL(request.url);
     const tournamentKey = parseTournamentKey(searchParams.get('tournamentKey'), { required: true });
     const tour = parseTour(searchParams.get('tour'));
 
-    const cacheKey = ['draws13', tournamentKey, tour];
+    const seasonQuery = String(searchParams.get('season') || '').trim();
+    const seasonKey = /^\d{4}$/.test(seasonQuery) ? seasonQuery : '';
+    // Season is part of the key so an official record for one edition cannot
+    // be served as another. The UI always sends season.
+    const cacheKey = [DRAWS_CACHE_RESOURCE, tournamentKey, tour, seasonKey];
     const cached   = await cache.get(env, ...cacheKey);
     if (cached) return cached.data;
 
@@ -163,24 +192,26 @@ export async function handleDraws(request, env) {
         roundMap[ri].matches.push(f);
     }
 
-    const rounds = assignSlotOrder(
-        stripPhantomFixtures(
-            Object.values(roundMap)
-                .sort((a, b) => a.order - b.order)
-                .filter(r => r.matches.length > 0)
-        ),
-        tour, tournamentName
+    const stripped = stripPhantomFixtures(
+        Object.values(roundMap)
+            .sort((a, b) => a.order - b.order)
+            .filter(r => r.matches.length > 0)
     );
+    const season = drawSeason(searchParams, stripped);
+    const officialRecord = await readOfficialDraw(env, tour, tournamentKey, season);
+    const rounds = assignSlotOrder(stripped, tour, tournamentName, officialRecord);
 
     const result = {
         tournamentKey,
         name:         tournamentName,
         totalMatches: completedMatches.length,
         rounds,
-        // true  = emergency BRACKET_SLOTS override placed the printed sheet.
-        // false = general winner-tree layout (adjacent slots meet; not the
-        //         official printed order). Overrides are live-fire only.
-        slotOrderVerified: rounds.some(r => r.slotOrderVerified),
+        // slotOrderVerified true = official record (or emergency override).
+        // slotOrderMismatch true = record exists but contradicts played
+        // sections, so the winner-tree layout is what shipped.
+        // slotOrderVerification = { tour, sourceHost, checkedAt } when the
+        // official record was applied. Absent when unchecked.
+        ...drawOrderFields(rounds),
     };
 
     // ── Adaptive cache TTL ────────────────────────────────────────────────────
