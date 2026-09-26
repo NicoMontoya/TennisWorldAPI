@@ -94,6 +94,27 @@ export const cache = {
     },
 
     /**
+     * getEdge(...keyParts)
+     * Cache API only — no KV read. Pair with setEdge so a cold miss does not
+     * also GET a KV key that is never written (rank-by-age stores its permanent
+     * record under a different key).
+     */
+    async getEdge(...keyParts) {
+        return edgeGet(buildKey(...keyParts));
+    },
+
+    /**
+     * deleteEdge(...keyParts)
+     * Drop a Cache API entry only. Does not touch KV. Called when a permanent
+     * rank-by-age record is overwritten so the next GET misses the edge and
+     * reads the new KV value.
+     */
+    async deleteEdge(...keyParts) {
+        const key = buildKey(...keyParts);
+        try { await caches.default.delete(edgeUrl(key)); } catch { /* local dev */ }
+    },
+
+    /**
      * set(env, ttlSeconds, value, ...keyParts[, { skipStale }])
      * Writes to edge cache + KV (with TTL), and updates the stale backup
      * unless skipStale is set (sticky-completion `:done`: one KV write
