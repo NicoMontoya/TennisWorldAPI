@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assignSlotOrder, getBracketSlots } from './bracketSlots.js';
+import { buildOfficialRecord, mapOfficialPairs } from './officialDraw.js';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'mocks/draws');
 function loadPeer(file) {
@@ -105,27 +106,65 @@ function guadalajaraRaw() {
     ];
 }
 
-describe('getBracketSlots — Guadalajara 2026 WTA', () => {
-    it('matches lettersOnly includes on the live tournament name', () => {
+// Printed Guadalajara order. The hand table still covers 16745 until a
+// record is stored; these pairs prove a record can replace it.
+const GDL_PAIRS = [
+    ['Kostyuk', 'Bye'],
+    ['Maria', 'Townsend'],
+    ['Kalieva', 'Day'],
+    ['Jacquemot', 'Samsonova'],
+    ['Parry', 'Bye'],
+    ['Stearns', 'Arango'],
+    ['Monnet', 'Stephens'],
+    ['Vidmanova', 'Tjen'],
+    ['Bucsa', 'Andreescu'],
+    ['Udvardy', 'Boisson'],
+    ['Parks', 'Lepchenko'],
+    ['Bye', 'Bejlek'],
+    ['Frech', 'Hibino'],
+    ['Zarazua', 'Dolehide'],
+    ['Sonmez', 'Shymanovich'],
+    ['Bye', 'Jovic'],
+];
+
+function gdlRecord(rounds) {
+    const mapped = mapOfficialPairs(rounds, GDL_PAIRS);
+    if (!mapped.ok) throw new Error(`unmapped: ${mapped.unmapped.join(', ')}`);
+    const built = buildOfficialRecord({
+        tournamentKey: '16745',
+        season: '2026',
+        tour: 'WTA',
+        sourceHost: 'wtatennis.com',
+        checkedAt: '2026-09-26',
+        slots: mapped.slots,
+    });
+    if (!built.ok) throw new Error(built.error);
+    return built.record;
+}
+
+describe('getBracketSlots — emergency overrides only', () => {
+    it('still matches the Guadalajara hand table until a record replaces it', () => {
         const pairs = getBracketSlots('Guadalajara Open Akron - Guadalajara', 2026, 'WTA');
         expect(pairs).toBeTruthy();
         expect(pairs).toHaveLength(16);
         expect(pairs[0]).toEqual(['Kostyuk', 'BYE']);
-        expect(pairs[1]).toEqual(['Maria', 'Townsend']);
         expect(pairs[15]).toEqual(['BYE', 'Jovic']);
-        expect(pairs[11]).toEqual(['BYE', 'Bejlek']);
-        expect(pairs[10]).toEqual(['Parks', 'Lepchenko']);
-    });
-
-    it('does not match ATP or the wrong year', () => {
         expect(getBracketSlots('Guadalajara Open Akron - Guadalajara', 2026, 'ATP')).toBeNull();
         expect(getBracketSlots('Guadalajara Open Akron - Guadalajara', 2025, 'WTA')).toBeNull();
     });
+
+    it('still resolves an emergency BRACKET_SLOTS entry', () => {
+        const pairs = getBracketSlots('US Open', 2026, 'ATP');
+        expect(pairs).toBeTruthy();
+        expect(pairs.length).toBeGreaterThan(16);
+        expect(getBracketSlots('US Open', 2026, 'WTA')).toBeNull();
+    });
 });
 
-describe('assignSlotOrder — Guadalajara override', () => {
+describe('assignSlotOrder — Guadalajara official record', () => {
     it('places first-round in official order and fills printed byes only', () => {
-        const rounds = assignSlotOrder(guadalajaraRaw(), 'WTA', 'Guadalajara Open Akron - Guadalajara');
+        const raw = guadalajaraRaw();
+        const rounds = assignSlotOrder(raw, 'WTA', 'Guadalajara Open Akron - Guadalajara', gdlRecord(raw));
         const r32 = rounds.find(r => /32/i.test(r.round)).matches;
         expect(r32).toHaveLength(16);
         expect(r32[0].player1Name.toLowerCase()).toContain('kostyuk');
@@ -152,10 +191,28 @@ describe('assignSlotOrder — Guadalajara override', () => {
         expect(r32[15].player1Name).toBe('BYE');
         expect(r32.every(m => m.slotIndex != null)).toBe(true);
         expect(rounds[0].slotOrderVerified).toBe(true);
+        expect(rounds.slotOrderVerification).toEqual({
+            tour: 'WTA', sourceHost: 'wtatennis.com', checkedAt: '2026-09-26',
+        });
+    });
+
+    it('the hand table still verifies when no record is stored', () => {
+        const rounds = assignSlotOrder(guadalajaraRaw(), 'WTA', 'Guadalajara Open Akron - Guadalajara');
+        expect(rounds[0].slotOrderVerified).toBe(true);
+        expect(rounds.slotOrderVerification).toBeUndefined();
+    });
+
+    it('a stale record does not stay verified via the hand table', () => {
+        const raw = guadalajaraRaw();
+        const stale = { ...gdlRecord(raw), checksum: '0'.repeat(64) };
+        const rounds = assignSlotOrder(raw, 'WTA', 'Guadalajara Open Akron - Guadalajara', stale);
+        expect(rounds[0].slotOrderVerified).toBe(false);
+        expect(rounds[0].slotOrderMismatch).toBeUndefined();
     });
 
     it('does not invent player names on incomplete slots', () => {
-        const rounds = assignSlotOrder(guadalajaraRaw(), 'WTA', 'Guadalajara Open Akron - Guadalajara');
+        const raw = guadalajaraRaw();
+        const rounds = assignSlotOrder(raw, 'WTA', 'Guadalajara Open Akron - Guadalajara', gdlRecord(raw));
         const invented = [];
         for (const r of rounds) {
             for (const m of r.matches) {
@@ -173,7 +230,8 @@ describe('assignSlotOrder — Guadalajara override', () => {
     });
 
     it('R16 count is 8 with Kostyuk/Townsend path; adjacent-slot R16→QF is 4/4', () => {
-        const rounds = assignSlotOrder(guadalajaraRaw(), 'WTA', 'Guadalajara Open Akron - Guadalajara');
+        const raw = guadalajaraRaw();
+        const rounds = assignSlotOrder(raw, 'WTA', 'Guadalajara Open Akron - Guadalajara', gdlRecord(raw));
         const r16 = rounds.find(r => /16/i.test(r.round)).matches;
         const qf = rounds.find(r => /quarter/i.test(r.round)).matches;
         expect(r16).toHaveLength(8);
@@ -191,7 +249,8 @@ describe('assignSlotOrder — Guadalajara override', () => {
     });
 
     it('copies Kostyuk\'s live player key onto the synthetic bye', () => {
-        const rounds = assignSlotOrder(guadalajaraRaw(), 'WTA', 'Guadalajara Open Akron - Guadalajara');
+        const raw = guadalajaraRaw();
+        const rounds = assignSlotOrder(raw, 'WTA', 'Guadalajara Open Akron - Guadalajara', gdlRecord(raw));
         const r32 = rounds.find(r => /32/i.test(r.round)).matches;
         expect(r32[0].player1Key).toBe('47742');
     });
@@ -279,7 +338,7 @@ describe('peer live draws — general path, no new overrides', () => {
         expect(adjacentOk(r16.matches, qf.matches)).toBe(4);
     });
 
-    it('Guadalajara 16745 with override stays GREEN (verified, R16=8, adjacent 4/4)', () => {
+    it('Guadalajara 16745 with the hand table stays GREEN (verified, R16=8, adjacent 4/4)', () => {
         const data = loadPeer('guadalajara16745.json');
         expect(getBracketSlots(data.name, 2026, 'WTA')).toBeTruthy();
         const rounds = assignSlotOrder(cloneRounds(data), 'WTA', data.name);
