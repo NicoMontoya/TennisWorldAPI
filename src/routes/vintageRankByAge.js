@@ -37,11 +37,16 @@
 // `reason` is omitted when years is non-empty.
 //
 // Cost:
-//   GET warm (Cache API hit): 0 KV reads, 0 KV writes.
-//   GET cold hit: 1 KV read (this player's record), 0 writes, then an edge store.
-//   GET miss: that read + 1 index read, 0 writes. Misses are not edge-cached.
+//   GET warm (Cache API hit, including a cached miss): 0 KV reads, 0 KV writes.
+//   GET cold hit: 1 KV read (this player's record), 0 writes, then an edge store (24h).
+//   GET miss: that read + 1 index read, 0 writes, then an edge store of the
+//   not-loaded / rankings-not-loaded body (1h). Import deletes that edge entry.
 //   Backfill: 1 permanent KV write per roster player (script dry-run unless
 //   --write). No per-request writes. See docs/sackmann-atp-backfill.md.
+//
+// playerKey is s + 1–10 digits, or 1–10 digits. Anything longer is 400 and
+// does not touch KV. GET is rate-limited per IP (Cache API bucket
+// vintage-rank-by-age, same helper as /api/hub and /api/livescore).
 //
 // Storage: tw:vintage-rank-by-age:v1:{tour}:{playerKey}
 //   { name, asOf, rankingsStart, ageAtRankingsStart, years, reason? }
@@ -49,11 +54,12 @@
 // mistake the permanent record for an edge wrapper.
 
 import { cache } from '../cache.js';
-import { parseTour } from '../security.js';
+import { parseTour, rateLimit } from '../security.js';
 import { indexKey } from './rankingsHistory.js';
 import { canonicalPlayerKey, MIN_RANKED_WEEKS } from '../rankByAge.js';
 
 const TTL_EDGE = 24 * 60 * 60;
+const TTL_MISS = 60 * 60;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_IMPORT = 40;
 
@@ -156,6 +162,8 @@ function unavailable(tour, playerKey, reason, extra = {}) {
 }
 
 export async function handleVintageRankByAge(request, env) {
+    await rateLimit(env, request, 'vintage-rank-by-age');
+
     const { searchParams } = new URL(request.url);
     const tour = parseTour(searchParams.get('tour'));
     const rawKey = searchParams.get('playerKey');
@@ -177,13 +185,17 @@ export async function handleVintageRankByAge(request, env) {
     }
 
     // Player record missing. One extra read so the UI still learns the calendar
-    // horizon. Not edge-cached — a backfill should show up on the next GET.
+    // horizon. The miss itself is edge-cached so random valid keys cannot
+    // re-read KV on every poll. Import deletes this edge entry.
     const index = await env.TENNIS_CACHE.get(indexKey(tour), 'json');
-    if (!index?.dates?.length) return unavailable(tour, playerKey, 'rankings-not-loaded');
-    return unavailable(tour, playerKey, 'not-loaded', {
-        asOf: index.max || null,
-        rankingsStart: index.min || null,
-    });
+    const miss = (!index?.dates?.length)
+        ? unavailable(tour, playerKey, 'rankings-not-loaded')
+        : unavailable(tour, playerKey, 'not-loaded', {
+            asOf: index.max || null,
+            rankingsStart: index.min || null,
+        });
+    await cache.setEdge(TTL_MISS, miss, ...edgeParts(tour, playerKey));
+    return miss;
 }
 
 // POST /api/admin/import-vintage-rank-by-age

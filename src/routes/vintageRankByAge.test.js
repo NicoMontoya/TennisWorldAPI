@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import worker from '../index.js';
 import { rankByAgeKey } from './vintageRankByAge.js';
+import { RL_PER_MINUTE, rateLimitCacheUrl } from '../security.js';
 
 function mockEnv() {
     const store = new Map();
@@ -32,31 +33,37 @@ function mockEnv() {
     };
 }
 
+function cacheUrl(req) {
+    return typeof req === 'string' ? req : req.url;
+}
+
 function installMockCaches() {
     const store = new Map();
     globalThis.caches = {
         default: {
             async match(req) {
-                const url = typeof req === 'string' ? req : req.url;
-                const body = store.get(url);
-                if (body === undefined) return undefined;
-                return new Response(body, { headers: { 'Content-Type': 'application/json' } });
+                const entry = store.get(cacheUrl(req));
+                if (!entry) return undefined;
+                return new Response(entry.body, { headers: entry.headers });
             },
             async put(req, res) {
-                const url = typeof req === 'string' ? req : req.url;
-                store.set(url, await res.text());
+                const headers = {};
+                res.headers.forEach((v, k) => { headers[k] = v; });
+                store.set(cacheUrl(req), { body: await res.text(), headers });
             },
             async delete(req) {
-                const url = typeof req === 'string' ? req : req.url;
-                return store.delete(url);
+                return store.delete(cacheUrl(req));
             },
+            _store: store,
         },
     };
     return store;
 }
 
-function get(path) {
-    return new Request(`https://tennisworld-api.nicomontoya.workers.dev${path}`);
+function get(path, ip) {
+    const headers = {};
+    if (ip) headers['CF-Connecting-IP'] = ip;
+    return new Request(`https://tennisworld-api.nicomontoya.workers.dev${path}`, { headers });
 }
 
 function post(path, body, { secret } = {}) {
@@ -212,7 +219,8 @@ describe('GET /api/vintage-rank-by-age', () => {
             max: '2026-06-08',
             dates: ['1973-08-27', '2026-06-08'],
         }));
-        const missing = await worker.fetch(get('/api/vintage-rank-by-age?tour=ATP&playerKey=47275'), env);
+        // A different key: 47275's rankings-not-loaded miss is already edge-cached.
+        const missing = await worker.fetch(get('/api/vintage-rank-by-age?tour=ATP&playerKey=s101948'), env);
         expect((await missing.json()).data).toMatchObject({
             available: false,
             reason: 'not-loaded',
@@ -267,5 +275,104 @@ describe('GET /api/vintage-rank-by-age', () => {
         expect((await worker.fetch(get('/api/vintage-rank-by-age?tour=ATP'), env)).status).toBe(400);
         expect((await worker.fetch(get('/api/vintage-rank-by-age?tour=ATP&playerKey=sampras'), env)).status).toBe(400);
         expect((await worker.fetch(get('/api/vintage-rank-by-age?tour=ITF&playerKey=s1'), env)).status).toBe(400);
+    });
+
+    it('returns 400 for an oversized playerKey and does not read KV', async () => {
+        const eleven = `s${'1'.repeat(11)}`;
+        const huge = `s${'9'.repeat(200)}`;
+        const longNumeric = '4'.repeat(11);
+        const veryLong = 'x'.repeat(4000);
+        env.resetGets();
+        for (const playerKey of [eleven, huge, longNumeric, veryLong]) {
+            const res = await worker.fetch(get(`/api/vintage-rank-by-age?tour=ATP&playerKey=${encodeURIComponent(playerKey)}`), env);
+            expect(res.status, playerKey.slice(0, 24)).toBe(400);
+            expect((await res.json()).error).toMatch(/Invalid playerKey/i);
+        }
+        expect(env.gets()).toBe(0);
+        expect(env.TENNIS_CACHE._puts).toHaveLength(0);
+
+        const skipped = await worker.fetch(post('/api/admin/import-vintage-rank-by-age', {
+            tour: 'ATP',
+            records: { [eleven]: fedRecord(), [veryLong]: fedRecord() },
+        }, { secret: env.ADMIN_SECRET }), env);
+        expect((await skipped.json()).data).toMatchObject({ written: 0, skipped: 2, errors: 0 });
+        expect(env.TENNIS_CACHE._puts).toHaveLength(0);
+
+        const ten = `s${'1'.repeat(10)}`;
+        const ok = await worker.fetch(get(`/api/vintage-rank-by-age?tour=ATP&playerKey=${ten}`), env);
+        expect(ok.status).toBe(200);
+        expect((await ok.json()).data.reason).toBe('rankings-not-loaded');
+    });
+
+    it('serves a repeated miss from the edge cache with no second KV read', async () => {
+        env.resetGets();
+        const first = await worker.fetch(get('/api/vintage-rank-by-age?tour=ATP&playerKey=47275'), env);
+        expect((await first.json()).data.reason).toBe('rankings-not-loaded');
+        expect(env.gets()).toBe(2);
+        const missEdge = [...caches.default._store.entries()].find(([url]) => url.includes('vintage-rank-by-age-v1'));
+        expect(missEdge?.[1].headers['cache-control']).toBe('public, max-age=3600');
+
+        env.resetGets();
+        const second = await worker.fetch(get('/api/vintage-rank-by-age?tour=ATP&playerKey=47275'), env);
+        expect((await second.json()).data.reason).toBe('rankings-not-loaded');
+        expect(env.gets()).toBe(0);
+
+        env.TENNIS_CACHE._store.set('tw:rankings-history-index:v1:ATP', JSON.stringify({
+            min: '1973-08-27',
+            max: '2026-06-08',
+            dates: ['1973-08-27', '2026-06-08'],
+        }));
+        env.resetGets();
+        const indexed = await worker.fetch(get('/api/vintage-rank-by-age?tour=ATP&playerKey=s101948'), env);
+        expect((await indexed.json()).data).toMatchObject({
+            reason: 'not-loaded',
+            asOf: '2026-06-08',
+            rankingsStart: '1973-08-27',
+        });
+        expect(env.gets()).toBe(2);
+
+        env.resetGets();
+        const indexedAgain = await worker.fetch(get('/api/vintage-rank-by-age?tour=ATP&playerKey=s101948'), env);
+        expect((await indexedAgain.json()).data.reason).toBe('not-loaded');
+        expect(env.gets()).toBe(0);
+    });
+
+    it('clears a cached miss when that player is imported', async () => {
+        const missed = await worker.fetch(get('/api/vintage-rank-by-age?tour=ATP&playerKey=47275'), env);
+        expect((await missed.json()).data.reason).toBe('rankings-not-loaded');
+
+        const imported = await worker.fetch(post('/api/admin/import-vintage-rank-by-age', {
+            tour: 'ATP',
+            records: {
+                '47275': {
+                    name: 'Jannik Sinner',
+                    asOf: '2026-06-08',
+                    rankingsStart: '1973-08-27',
+                    ageAtRankingsStart: null,
+                    years: [{ age: 22, rank: 1, weeksAtRank: 30, rankedWeeks: 52, partial: true }],
+                },
+            },
+        }, { secret: env.ADMIN_SECRET }), env);
+        expect((await imported.json()).data.written).toBe(1);
+
+        const res = await worker.fetch(get('/api/vintage-rank-by-age?tour=ATP&playerKey=47275'), env);
+        expect((await res.json()).data).toMatchObject({
+            available: true,
+            name: 'Jannik Sinner',
+            years: [{ age: 22, rank: 1, weeksAtRank: 30, rankedWeeks: 52, partial: true }],
+        });
+    });
+
+    it('returns 429 once the vintage-rank-by-age bucket is exhausted', async () => {
+        const ip = '203.0.113.15';
+        await caches.default.put(rateLimitCacheUrl('vintage-rank-by-age', ip), new Response(
+            JSON.stringify({ count: RL_PER_MINUTE.max, windowStart: Date.now() }),
+            { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=60' } },
+        ));
+        env.resetGets();
+        const res = await worker.fetch(get('/api/vintage-rank-by-age?tour=ATP&playerKey=47275', ip), env);
+        expect(res.status).toBe(429);
+        expect((await res.json()).error).toMatch(/too many requests/i);
+        expect(env.gets()).toBe(0);
     });
 });

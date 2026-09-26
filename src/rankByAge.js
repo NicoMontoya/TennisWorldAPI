@@ -20,8 +20,10 @@ export const MIN_RANKED_WEEKS = 13;
 export const MIN_RANKED_DAYS = MIN_RANKED_WEEKS * 7; // 91
 export const TOP_RANK = 200;
 
-const LEGEND_RE = /^s(\d+)$/i;
-const NUMERIC_RE = /^\d{1,20}$/;
+// 1–10 digits. Sackmann ids are 6 digits; RapidAPI player ids are shorter.
+// Longer keys are rejected before any KV read.
+const LEGEND_RE = /^s(\d{1,10})$/i;
+const NUMERIC_RE = /^\d{1,10}$/;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function canonicalPlayerKey(raw) {

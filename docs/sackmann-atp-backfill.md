@@ -176,7 +176,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$BASE/api/admin/import-vintag
 | `rankings-not-loaded` | false | ATP weekly index itself is missing |
 | `wta-ranking-history-not-loaded` | false | WTA. `years` is `[]`, `asOf` is null. No KV read. |
 
-Cost: a warm GET is 0 KV reads and 0 writes (Cache API, 24h). A cold hit is 1 KV read and 0 writes. A miss is 2 KV reads (player key, then the rankings index) and 0 writes; misses are not edge-cached. The backfill is 1 permanent KV write per joined roster player (no TTL), batched 20 per admin POST. Re-run after a rankings-history refresh; do not stack it on a day that is already near 1,000 writes. Resume a partial `--write` with `--offset`.
+Cost: a warm GET is 0 KV reads and 0 writes (Cache API). A loaded player is cached 24h. A cold hit is 1 KV read and 0 writes. A miss is 2 KV reads (player key, then the rankings index) and 0 writes, then the `not-loaded` / `rankings-not-loaded` body is edge-cached for 1 hour so a repeat does not read KV again. Import deletes that edge entry, so a backfilled player shows up on the next GET. `playerKey` is at most 10 digits (with an optional `s` prefix); a longer key is HTTP 400 and does not touch KV. The GET is rate-limited per IP (60/minute, bucket `vintage-rank-by-age`). The backfill is 1 permanent KV write per joined roster player (no TTL), batched 20 per admin POST. Re-run after a rankings-history refresh; do not stack it on a day that is already near 1,000 writes. Resume a partial `--write` with `--offset`.
 
 ## If a run dies mid-way
 
