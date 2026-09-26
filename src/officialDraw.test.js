@@ -276,9 +276,18 @@ describe('POST /api/admin/import-official-draw', () => {
         const rounds = cloneRounds(loadJson(`${event.file}.json`));
         const record = recordFor(event, rounds, parseOfficialFirstRound(loadText(`${event.file}.txt`)).pairs);
 
+        env.TENNIS_CACHE._store.set('tw:draws14:21352:ATP', '{"data":1}');
+        env.TENNIS_CACHE._store.set('tw:draws14:21352:ATP:stale', '{"data":1}');
+        env.TENNIS_CACHE._store.set('tw:draws14:21352:ATP:2026', '{"data":1}');
+        env.TENNIS_CACHE._store.set('tw:draws14:21352:ATP:2026:stale', '{"data":1}');
+
         const written = await handleImportOfficialDraw(post(record, env.ADMIN_SECRET), env);
         expect(written.written).toBe(true);
         expect(written.slots).toBe(16);
+        expect(env.TENNIS_CACHE._store.has('tw:draws14:21352:ATP')).toBe(false);
+        expect(env.TENNIS_CACHE._store.has('tw:draws14:21352:ATP:stale')).toBe(false);
+        expect(env.TENNIS_CACHE._store.has('tw:draws14:21352:ATP:2026')).toBe(true);
+        expect(env.TENNIS_CACHE._store.has('tw:draws14:21352:ATP:2026:stale')).toBe(true);
         const stored = [...env.TENNIS_CACHE._store.keys()].filter(k => k.startsWith('tw:official-draw:'));
         expect(stored).toEqual(['tw:official-draw:v1:ATP:21352:2026']);
         const again = await handleImportOfficialDraw(post(record, env.ADMIN_SECRET), env);

@@ -61,9 +61,11 @@ function stripPhantomFixtures(rounds) {
     return rounds.filter(r => r.matches.length > 0);
 }
 
-function drawSeason(searchParams, rounds) {
-    const q = String(searchParams.get('season') || '').trim();
-    if (/^\d{4}$/.test(q)) return q;
+// Year of this edition, from match dates only. A query `season` is not used:
+// any 4-digit value used to become its own cache key, and each miss is
+// several upstream calls plus two KV writes (one a never-expiring :stale
+// backup). The feed is already one edition per tournament id.
+function drawSeason(rounds) {
     for (const r of rounds || []) {
         for (const m of r.matches || []) {
             const y = String(m.date || '').slice(0, 4);
@@ -84,20 +86,16 @@ export function drawOrderFields(rounds) {
     return fields;
 }
 
-// GET /api/draws?tournamentKey=XXXX&season=YYYY
-// tournamentKey is the new RapidAPI tournament id.
-// season selects the official-draw record (tournamentKey + season). The
-// upstream feed itself is already one edition per tournament id.
+// GET /api/draws?tournamentKey=XXXX&tour=ATP|WTA
+// tournamentKey is the new RapidAPI tournament id. Query `season` is ignored.
+// The official-draw record is the year on the match dates, not the query.
+// One cache entry per tournament id: ['draws14', tournamentKey, tour].
 export async function handleDraws(request, env) {
     const { searchParams } = new URL(request.url);
     const tournamentKey = parseTournamentKey(searchParams.get('tournamentKey'), { required: true });
     const tour = parseTour(searchParams.get('tour'));
 
-    const seasonQuery = String(searchParams.get('season') || '').trim();
-    const seasonKey = /^\d{4}$/.test(seasonQuery) ? seasonQuery : '';
-    // Season is part of the key so an official record for one edition cannot
-    // be served as another. The UI always sends season.
-    const cacheKey = [DRAWS_CACHE_RESOURCE, tournamentKey, tour, seasonKey];
+    const cacheKey = [DRAWS_CACHE_RESOURCE, tournamentKey, tour];
     const cached   = await cache.get(env, ...cacheKey);
     if (cached) return cached.data;
 
@@ -197,7 +195,7 @@ export async function handleDraws(request, env) {
             .sort((a, b) => a.order - b.order)
             .filter(r => r.matches.length > 0)
     );
-    const season = drawSeason(searchParams, stripped);
+    const season = drawSeason(stripped);
     const officialRecord = await readOfficialDraw(env, tour, tournamentKey, season);
     const rounds = assignSlotOrder(stripped, tour, tournamentName, officialRecord);
 
