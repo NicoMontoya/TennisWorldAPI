@@ -15,8 +15,8 @@
 // index are permanent (no TTL) so public GET keeps working after import.
 // Reads load one year value and return the requested week.
 
-const yearKey  = (tour, year) => `tw:rankings-history:v1:${tour}:${year}`;
-const indexKey = (tour)       => `tw:rankings-history-index:v1:${tour}`;
+export const yearKey  = (tour, year) => `tw:rankings-history:v1:${tour}:${year}`;
+export const indexKey = (tour)       => `tw:rankings-history-index:v1:${tour}`;
 
 // ── GET /api/rankings-history ──────────────────────────────────────────────────
 //   ?tour=ATP&meta=1                     → { min, max, count, dates:[…] }

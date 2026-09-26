@@ -95,9 +95,10 @@ After first deploy: run `curl "$BASE/api/admin/backfill-rankings?tour=ATP&weeksB
 once so player-profile ranking charts have history immediately (cron keeps them fresh after).
 
 ATP Sackmann historical data (career rank arcs, Time Machine weekly lists,
-vintage legends) is **not** created by that RapidAPI week crawl. Load it from
-the local `../tennis_atp` clone with the three scripts, targeting production
+vintage legends, vintage rank-by-age) is **not** created by that RapidAPI week crawl. Load it from
+the local `../tennis_atp` clone with the backfill scripts, targeting production
 via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackmann-atp-backfill.md).
+`/api/vintage-rank-by-age` reads one precomputed player record (Cache API after the first hit). The rank-by-age script is dry-run unless `--write`.
 `wrangler dev` KV is local-only; localhost backfills never fill workers.dev.
 
 ## Free-tier quota watch items

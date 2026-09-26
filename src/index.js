@@ -17,6 +17,7 @@ import { handleDraws }            from './routes/draws.js';
 import { handleCalendar }         from './routes/calendar.js';
 import { handlePlayerHistory }     from './routes/playerHistory.js';
 import { handleVintageRoster, handlePlayerVintage, handleImportVintage } from './routes/vintage.js';
+import { handleVintageRankByAge, handleImportVintageRankByAge } from './routes/vintageRankByAge.js';
 import { handlePlayerRankHistory, seedRankSnapshots } from './routes/playerRankHistory.js';
 import { handleBackfillRankings, handleClearRankHistory, handleImportRankHistory, handleImportMatches } from './routes/adminBackfill.js';
 import { handleRankingsHistory, handleImportRankingsHistory } from './routes/rankingsHistory.js';
@@ -42,6 +43,7 @@ const GET_ROUTES = {
     '/api/player-history':         handlePlayerHistory,
     '/api/vintage-roster':         handleVintageRoster,
     '/api/player-vintage':         handlePlayerVintage,
+    '/api/vintage-rank-by-age':    handleVintageRankByAge,
     '/api/player-ranking-history':      handlePlayerRankHistory,
     '/api/rankings-history':            handleRankingsHistory,
     '/api/admin/backfill-rankings':     handleBackfillRankings,
@@ -65,6 +67,7 @@ const POST_ROUTES = {
     '/api/admin/import-rank-history': handleImportRankHistory,
     '/api/admin/import-rankings-history': handleImportRankingsHistory,
     '/api/admin/import-vintage':          handleImportVintage,
+    '/api/admin/import-vintage-rank-by-age': handleImportVintageRankByAge,
     '/api/admin/import-matches':          handleImportMatches,
 };
 
