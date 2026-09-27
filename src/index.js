@@ -73,6 +73,20 @@ const POST_ROUTES = {
     '/api/admin/import-official-draw':    handleImportOfficialDraw,
 };
 
+// Session and per-user payloads. Browsers, shared proxies, and the edge must
+// not store these. Public routes are absent on purpose and keep their headers.
+const PRIVATE_NO_STORE = new Set([
+    '/api/auth/register',
+    '/api/auth/login',
+    '/api/auth/me',
+    '/api/auth/update-profile',
+    '/api/auth/change-password',
+    '/api/favorites',
+    '/api/favorites/toggle',
+    '/api/bracket/mine',
+    '/api/bracket/save',
+]);
+
 // ── CORS headers ──────────────────────────────────────────────────────────────
 // Production: honor the configured CORS_ORIGIN.
 // Dev: reflect any localhost / 127.0.0.1 origin so the UI works on any port
@@ -163,11 +177,13 @@ export default {
 };
 
 function jsonResponse(body, status, env, request) {
-    return new Response(JSON.stringify(body), {
-        status,
-        headers: {
-            'Content-Type': 'application/json',
-            ...corsHeaders(env, request),
-        },
-    });
+    const headers = {
+        'Content-Type': 'application/json',
+        ...corsHeaders(env, request),
+    };
+    const method = request && request.method;
+    if ((method === 'GET' || method === 'POST') && PRIVATE_NO_STORE.has(new URL(request.url).pathname)) {
+        headers['Cache-Control'] = 'private, no-store';
+    }
+    return new Response(JSON.stringify(body), { status, headers });
 }
