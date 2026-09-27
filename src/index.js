@@ -157,15 +157,9 @@ export default {
             return new Response(null, { status: 204, headers: corsHeaders(env, request) });
         }
 
-        // `curl -I` sends HEAD. Personalized GET routes must answer as GET so
-        // the 401 (and every other status) still carries Cache-Control.
-        const method = request.method === 'HEAD' && PRIVATE_NO_STORE.has(pathname) && GET_ROUTES[pathname]
-            ? 'GET'
-            : request.method;
-
         let handler;
-        if (method === 'GET')  handler = GET_ROUTES[pathname];
-        if (method === 'POST') handler = POST_ROUTES[pathname];
+        if (request.method === 'GET')  handler = GET_ROUTES[pathname];
+        if (request.method === 'POST') handler = POST_ROUTES[pathname];
 
         if (!handler) {
             return jsonResponse({ error: `Unknown route: ${pathname}` }, 404, env, request);
@@ -187,7 +181,8 @@ function jsonResponse(body, status, env, request) {
         'Content-Type': 'application/json',
         ...corsHeaders(env, request),
     };
-    if (request && PRIVATE_NO_STORE.has(new URL(request.url).pathname)) {
+    const method = request && request.method;
+    if ((method === 'GET' || method === 'POST') && PRIVATE_NO_STORE.has(new URL(request.url).pathname)) {
         headers['Cache-Control'] = 'private, no-store';
     }
     return new Response(JSON.stringify(body), { status, headers });

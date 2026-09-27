@@ -90,12 +90,6 @@ describe('per-user Cache-Control', () => {
         }
     });
 
-    it('answers HEAD /api/bracket/mine as GET so curl -I sees the 401 header', async () => {
-        const res = await worker.fetch(req('/api/bracket/mine', { method: 'HEAD' }), env);
-        await expectPrivate(res, 401);
-        expect(await res.json()).toEqual({ ok: false, error: 'Unauthorized' });
-    });
-
     it('sets the header on login/register errors, including 429 and 500', async () => {
         const badLogin = await worker.fetch(req('/api/auth/login', {
             method: 'POST',
@@ -162,9 +156,5 @@ describe('per-user Cache-Control', () => {
             ok: false,
             error: expect.stringMatching(/ATP or WTA/i),
         });
-
-        const headHub = await worker.fetch(req('/api/hub', { method: 'HEAD' }), env);
-        expect(headHub.status).toBe(404);
-        expect(headHub.headers.get('Cache-Control')).toBeNull();
     });
 });
