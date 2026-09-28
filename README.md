@@ -121,12 +121,14 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
   Worker secret (60s edge TTL while anything is live, scheduled, or delayed).
   Leftover api-tennis.com routes still use `TENNIS_API_KEY`.
 - **`RAPIDAPI_HARD_STOP`** (`wrangler.toml` `[vars]`, ships as `off`). `on` stops
-  new RapidAPI calls after a 2xx response shows the monthly quota is exhausted
-  (`x-ratelimit-requests-remaining` present but non-numeric, zero, or negative).
-  A 2xx with that header missing only counts toward a per-location streak and
-  trips the shared flag when the streak reaches 3. Non-2xx responses are
-  ignored, except 429, which trips immediately. `off` never stops. `force`
-  stops immediately. Unset is `off`. Only the exact strings `off`, `on`, and
+  new RapidAPI calls once quota is exhausted. A response that carries
+  `x-ratelimit-requests-remaining` and is non-numeric, zero, or negative trips
+  on any status. A 2xx with that header missing counts a per-location edge
+  streak (not KV) and trips the shared flag at 3. The streak resets only on a
+  2xx with a valid remaining count. Header-less non-2xx responses do not trip
+  and do not change the streak. 429 always trips. Every fetch that is actually
+  sent, including 5xx, increments a separate edge call tally. `off` never
+  stops. `force` stops immediately, before any fetch. Unset is `off`. Only the exact strings `off`, `on`, and
   `force` are recognized; any other present value (blank, different case,
   trailing space, typo) acts as `on`. There is no route to change it. The
   shared flag is one KV write (`{until}`), read back through a 60s edge cache.

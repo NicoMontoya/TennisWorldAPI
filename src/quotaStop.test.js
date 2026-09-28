@@ -10,6 +10,7 @@ import worker from './index.js';
 import {
     QUOTA_FLAG_KEY,
     QUOTA_HEADER_MISS_THRESHOLD,
+    QUOTA_CALL_TALLY_EDGE,
     QUOTA_RESET_DEFAULT_SEC,
     QUOTA_RESET_MAX_SEC,
     QUOTA_RESET_MIN_SEC,
@@ -217,7 +218,7 @@ describe('RapidAPI quota hard stop', () => {
         assertLogsClean();
     });
 
-    it('a 2xx with no remaining header trips the shared flag only on the third miss', async () => {
+    it('three header-less responses in a row trip the shared flag', async () => {
         const env = mockEnv('on');
         const calls = rankingsFetch(undefined, '90');
 
@@ -237,25 +238,107 @@ describe('RapidAPI quota hard stop', () => {
         assertLogsClean();
     });
 
-    it('ignores quota headers on non-2xx responses other than 429', async () => {
-        for (const [status, remaining] of [
-            [500, '-6004'],
-            [502, undefined],
-            [404, '0'],
-            [400, 'abc'],
-        ]) {
-            resetQuotaStopStateForTests();
-            installMockCaches();
-            const env = mockEnv('on');
-            const calls = installFetch(() => jsonRes(
-                { error: true },
-                status,
-                remaining === undefined ? {} : { 'x-ratelimit-requests-remaining': remaining },
-            ));
-            await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toThrow('Upstream request failed');
-            expect(calls).toHaveLength(1);
-            expect(flagPuts(env)).toHaveLength(0);
-        }
+    function callTally() {
+        const entry = globalThis.caches.default._store.get(QUOTA_CALL_TALLY_EDGE);
+        if (!entry) return 0;
+        return Number(JSON.parse(entry.body).count) || 0;
+    }
+
+    it('a single header-less 5xx does not trip, and each 5xx increments the edge tally', async () => {
+        const env = mockEnv('on');
+        const calls = installFetch(() => jsonRes({ error: true }, 500));
+        await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toThrow('Upstream request failed');
+        expect(flagPuts(env)).toHaveLength(0);
+        expect(callTally()).toBe(1);
+        expect([...env.TENNIS_CACHE._store.keys()].some(k => String(k).includes('call-tally') || String(k).includes('miss-streak'))).toBe(false);
+
+        await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toThrow('Upstream request failed');
+        expect(calls).toHaveLength(2);
+        expect(flagPuts(env)).toHaveLength(0);
+        expect(callTally()).toBe(2);
+
+        const open = installFetch(() => jsonRes(
+            { data: [{ position: 1, player: { id: 1, name: 'A' } }] },
+            200,
+            { 'x-ratelimit-requests-remaining': '100', 'x-ratelimit-requests-reset': '3600' },
+        ));
+        await rapidAPI.rankings(env, 'ATP', 5);
+        expect(open).toHaveLength(1);
+        expect(flagPuts(env)).toHaveLength(0);
+    });
+
+    it('a 2xx with a valid remaining header resets the miss streak', async () => {
+        const env = mockEnv('on');
+        let remaining;
+        const calls = installFetch(() => {
+            const headers = {};
+            if (remaining !== undefined) headers['x-ratelimit-requests-remaining'] = String(remaining);
+            return jsonRes(
+                { data: [{ position: 1, player: { id: 1, name: 'A' } }] },
+                200,
+                headers,
+            );
+        });
+
+        remaining = undefined;
+        await rapidAPI.rankings(env, 'ATP', 5);
+        await rapidAPI.rankings(env, 'ATP', 5);
+        remaining = 80;
+        await rapidAPI.rankings(env, 'ATP', 5);
+        remaining = undefined;
+        await rapidAPI.rankings(env, 'ATP', 5);
+        await rapidAPI.rankings(env, 'ATP', 5);
+        expect(flagPuts(env)).toHaveLength(0);
+        expect(calls).toHaveLength(5);
+
+        await rapidAPI.rankings(env, 'ATP', 5);
+        expect(flagPuts(env)).toHaveLength(1);
+        expect(calls).toHaveLength(6);
+    });
+
+    it('a 403 whose remaining header is 0 trips the stop', async () => {
+        const env = mockEnv('on');
+        const calls = installFetch(() => jsonRes(
+            { error: true },
+            403,
+            { 'x-ratelimit-requests-remaining': '0', 'x-ratelimit-requests-reset': '3600' },
+        ));
+        await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toThrow('Upstream request failed');
+        expect(calls).toHaveLength(1);
+        expect(flagPuts(env)).toHaveLength(1);
+        expect(flagPuts(env)[0].opts.expirationTtl).toBe(3600);
+
+        await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toBeInstanceOf(QuotaStopError);
+        expect(calls).toHaveLength(1);
+        expect(callTally()).toBe(1);
+    });
+
+    it('errors between header-less misses do not reset the streak', async () => {
+        const env = mockEnv('on');
+        let status = 200;
+        const calls = installFetch(() => jsonRes(
+            status === 200
+                ? { data: [{ position: 1, player: { id: 1, name: 'A' } }] }
+                : { error: true },
+            status,
+        ));
+
+        await rapidAPI.rankings(env, 'ATP', 5);
+        await rapidAPI.rankings(env, 'ATP', 5);
+        expect(flagPuts(env)).toHaveLength(0);
+
+        status = 500;
+        await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toThrow('Upstream request failed');
+        expect(flagPuts(env)).toHaveLength(0);
+        expect(callTally()).toBe(3);
+
+        status = 200;
+        await rapidAPI.rankings(env, 'ATP', 5);
+        expect(flagPuts(env)).toHaveLength(1);
+        expect(calls).toHaveLength(4);
+
+        await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toBeInstanceOf(QuotaStopError);
+        expect(calls).toHaveLength(4);
     });
 
     it('429 trips the shared stop even when remaining still looks healthy', async () => {
@@ -393,6 +476,7 @@ describe('RapidAPI quota hard stop', () => {
         });
         expect(calls).toHaveLength(0);
         expect(flagPuts(env)).toHaveLength(0);
+        expect(callTally()).toBe(0);
         expect(logs.join('\n')).toMatch(/\[quota\] hard stop active/);
         assertLogsClean();
     });
