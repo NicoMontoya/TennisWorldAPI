@@ -21,7 +21,7 @@ import { handleVintageRankByAge, handleImportVintageRankByAge } from './routes/v
 import { handlePlayerRankHistory, seedRankSnapshots } from './routes/playerRankHistory.js';
 import { getCalendarYear } from './calendarYear.js';
 import { isQuotaStop } from './quotaStop.js';
-import { takeFetchedAt } from './fetchedAt.js';
+import { LIVESCORE_FETCHED_AT_UNKNOWN, normalizeFetchedAt, takeFetchedAt } from './fetchedAt.js';
 import { handleBackfillRankings, handleClearRankHistory, handleImportRankHistory, handleImportMatches } from './routes/adminBackfill.js';
 import { handleImportOfficialDraw } from './routes/officialDrawAdmin.js';
 import { handleRankingsHistory, handleImportRankingsHistory } from './routes/rankingsHistory.js';
@@ -184,19 +184,8 @@ export default {
             const data = await handler(request, env);
             // Scores polls /api/livescore and still expects data to be the match
             // array. The upstream time is a response header, not a body field.
-            const extra = {};
-            if (pathname === '/api/livescore') {
-                const fetchedAt = takeFetchedAt(data);
-                if (fetchedAt && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(fetchedAt)) {
-                    extra['X-Fetched-At'] = fetchedAt;
-                    // Cross-origin readers (localhost dev, or a CORS_ORIGIN host)
-                    // cannot see this header unless it is exposed. Same-origin
-                    // GETs omit Origin, so they do not get the extra CORS header.
-                    if (request.headers.get('Origin')) {
-                        extra['Access-Control-Expose-Headers'] = 'X-Fetched-At';
-                    }
-                }
-            }
+            // The header is always set so a missing header cannot signal a stop.
+            const extra = livescoreFetchedAtHeaders(pathname, request, takeFetchedAt(data));
             return jsonResponse({ ok: true, data }, 200, env, request, extra);
         } catch (err) {
             console.error(`[${pathname}]`, err.message);
@@ -204,10 +193,22 @@ export default {
             // QuotaStopError's message is already generic. Force it anyway so a
             // remaining count or stop flag can never reach the client.
             const message = isQuotaStop(err) ? 'Upstream request failed' : err.message;
-            return jsonResponse({ ok: false, error: message }, status, env, request);
+            const extra = livescoreFetchedAtHeaders(pathname, request, LIVESCORE_FETCHED_AT_UNKNOWN);
+            return jsonResponse({ ok: false, error: message }, status, env, request, extra);
         }
     },
 };
+
+function livescoreFetchedAtHeaders(pathname, request, fetchedAt) {
+    if (pathname !== '/api/livescore') return undefined;
+    const headers = { 'X-Fetched-At': normalizeFetchedAt(fetchedAt) };
+    // Cross-origin readers (localhost dev, or a CORS_ORIGIN host) cannot see
+    // this header unless it is exposed. Same-origin GETs omit Origin.
+    if (request && request.headers.get('Origin')) {
+        headers['Access-Control-Expose-Headers'] = 'X-Fetched-At';
+    }
+    return headers;
+}
 
 function jsonResponse(body, status, env, request, extraHeaders) {
     const headers = {
