@@ -90,7 +90,13 @@ export function drawOrderFields(rounds) {
 // { playerKey, rank }. rankingsPaged rows are { player: { id }, position }.
 async function loadRankMap(env, tour) {
     const cached = await cache.get(env, 'standings2', tour);
-    const rows = Array.isArray(cached?.data) ? cached.data : [];
+    let rows = Array.isArray(cached?.data) ? cached.data : [];
+    if (!rows.length) {
+        // Primary standings2 can expire while the no-TTL stale copy remains.
+        // Use that before paying for up to 10 rankings pages.
+        const stale = await cache.getStale(env, 'standings2', tour);
+        if (Array.isArray(stale?.data) && stale.data.length) rows = stale.data;
+    }
     if (rows.length) {
         return new Map(rows.map(r => [Number(r.playerKey), r.rank]));
     }

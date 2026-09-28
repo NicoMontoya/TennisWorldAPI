@@ -13,11 +13,16 @@
 // not a KV read on every request. A flag read that throws fails closed (no
 // paid call).
 //
-// Backup: if x-ratelimit-requests-remaining is missing on
-// QUOTA_HEADER_MISS_THRESHOLD (3) consecutive responses in this location, the
-// isolate stops locally. That counter lives in the Cache API only (10 min
-// TTL) and never writes KV. The local stop lasts for the clamped reset
-// (default 24h when the reset header is missing or not a number).
+// Bookkeeping runs only for 2xx responses, plus 429 (a 429 trips the shared
+// flag immediately). Other non-2xx responses, including 4xx/5xx and gateway
+// errors, are ignored so a blip cannot stop the site for 24h.
+// A 2xx that carries x-ratelimit-requests-remaining and is non-numeric, zero,
+// or negative is exhausted and trips the shared flag at once.
+// A 2xx with the header missing increments this location's miss streak.
+// The shared flag is written only when that streak reaches
+// QUOTA_HEADER_MISS_THRESHOLD (3). The same threshold also stops the isolate
+// locally. The counter lives in the Cache API only (10 min TTL). The local
+// stop lasts for the clamped reset (default 24h when reset is missing).
 //
 // x-ratelimit-requests-reset is seconds. It is clamped to 60s–31 days.
 // Missing or non-numeric reset uses 24h.
@@ -206,28 +211,42 @@ async function tripShared(env, resetRaw) {
     } catch { /* ignore */ }
 }
 
+function headerValue(response, name) {
+    try {
+        return response?.headers?.get(name);
+    } catch {
+        return null;
+    }
+}
+
 /** After a RapidAPI response. No-op unless the setting is `on`. */
 export async function noteRapidQuota(env, response) {
     if (hardStopMode(env) !== 'on') return;
-    let remaining;
-    let reset;
-    try {
-        remaining = response?.headers?.get('x-ratelimit-requests-remaining');
-        reset = response?.headers?.get('x-ratelimit-requests-reset');
-    } catch {
-        remaining = null;
-        reset = null;
+    const status = Number(response?.status);
+    const reset = headerValue(response, 'x-ratelimit-requests-reset');
+    // 429 is a trip even when the remaining header still looks healthy.
+    // Every other non-2xx is ignored (no streak, no flag).
+    if (status === 429) {
+        await tripLocal(clampQuotaReset(reset));
+        await tripShared(env, reset);
+        return;
     }
-    const state = classifyRemaining(remaining);
+    if (!Number.isFinite(status) || status < 200 || status >= 300) return;
+
+    const state = classifyRemaining(headerValue(response, 'x-ratelimit-requests-remaining'));
     if (state === 'ok') {
         await resetMissStreak();
         return;
     }
     if (state === 'missing') {
         const count = await bumpMissStreak();
-        if (count >= QUOTA_HEADER_MISS_THRESHOLD) await tripLocal(clampQuotaReset(reset));
-    } else {
-        await resetMissStreak();
+        if (count >= QUOTA_HEADER_MISS_THRESHOLD) {
+            await tripLocal(clampQuotaReset(reset));
+            await tripShared(env, reset);
+        }
+        return;
     }
+    // Header present, but non-numeric, zero, or negative: exhausted now.
+    await resetMissStreak();
     await tripShared(env, reset);
 }

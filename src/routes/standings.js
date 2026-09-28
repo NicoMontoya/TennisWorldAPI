@@ -20,7 +20,10 @@ export async function handleStandings(request, env) {
         const raw      = await rapidAPI.rankingsPaged(env, tour);
         const allItems = raw?.data || [];
 
-        // Find the latest ranking date present in the response
+        // The ranking feed's official week is the row `date` field (ISO
+        // timestamp, same value rankingsAtDate filters as RankingDate).
+        // There is no separate rankingDate on the upstream row. A missing
+        // date stays null — it is not replaced with the request's run date.
         const latestDate = allItems.reduce((best, i) => {
             if (!i.date) return best;
             return !best || i.date > best ? i.date : best;

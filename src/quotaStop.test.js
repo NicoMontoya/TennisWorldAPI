@@ -190,10 +190,9 @@ describe('RapidAPI quota hard stop', () => {
 
     it.each([
         ['-6004', '10', QUOTA_RESET_MIN_SEC],
-        [undefined, '90', 90],
         ['abc', String(QUOTA_RESET_MAX_SEC + 5000), QUOTA_RESET_MAX_SEC],
         ['0', undefined, QUOTA_RESET_DEFAULT_SEC],
-    ])('remaining %s trips the stop when the setting is on (reset ttl %s)', async (remaining, reset, ttl) => {
+    ])('remaining %s on a 2xx that carries the header trips the stop when the setting is on (reset ttl %s)', async (remaining, reset, ttl) => {
         const env = mockEnv('on');
         const calls = rankingsFetch(remaining, reset);
 
@@ -215,6 +214,65 @@ describe('RapidAPI quota hard stop', () => {
         const stored = JSON.parse(puts[0].value);
         expect(stored.until).toBeGreaterThan(Date.now());
         expect(stored.until).toBeLessThanOrEqual(Date.now() + ttl * 1000 + 2000);
+        assertLogsClean();
+    });
+
+    it('a 2xx with no remaining header trips the shared flag only on the third miss', async () => {
+        const env = mockEnv('on');
+        const calls = rankingsFetch(undefined, '90');
+
+        await rapidAPI.rankings(env, 'ATP', 5);
+        await rapidAPI.rankings(env, 'ATP', 5);
+        expect(flagPuts(env)).toHaveLength(0);
+        expect(calls).toHaveLength(2);
+
+        await rapidAPI.rankings(env, 'ATP', 5);
+        expect(calls).toHaveLength(3);
+        const puts = flagPuts(env);
+        expect(puts).toHaveLength(1);
+        expect(puts[0].opts.expirationTtl).toBe(90);
+
+        await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toBeInstanceOf(QuotaStopError);
+        expect(calls).toHaveLength(3);
+        assertLogsClean();
+    });
+
+    it('ignores quota headers on non-2xx responses other than 429', async () => {
+        for (const [status, remaining] of [
+            [500, '-6004'],
+            [502, undefined],
+            [404, '0'],
+            [400, 'abc'],
+        ]) {
+            resetQuotaStopStateForTests();
+            installMockCaches();
+            const env = mockEnv('on');
+            const calls = installFetch(() => jsonRes(
+                { error: true },
+                status,
+                remaining === undefined ? {} : { 'x-ratelimit-requests-remaining': remaining },
+            ));
+            await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toThrow('Upstream request failed');
+            expect(calls).toHaveLength(1);
+            expect(flagPuts(env)).toHaveLength(0);
+        }
+    });
+
+    it('429 trips the shared stop even when remaining still looks healthy', async () => {
+        const env = mockEnv('on');
+        const calls = installFetch(() => jsonRes(
+            { error: true },
+            429,
+            {
+                'x-ratelimit-requests-remaining': '5000',
+                'x-ratelimit-requests-reset': '120',
+            },
+        ));
+        await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toBeInstanceOf(QuotaStopError);
+        expect(calls).toHaveLength(1);
+        const puts = flagPuts(env);
+        expect(puts).toHaveLength(1);
+        expect(puts[0].opts.expirationTtl).toBe(120);
         assertLogsClean();
     });
 
