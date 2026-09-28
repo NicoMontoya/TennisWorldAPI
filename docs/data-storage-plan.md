@@ -6,7 +6,7 @@ Store RapidAPI tennis data that no longer changes in Cloudflare D1, and read it 
 
 ## D1 free tier (checked 2026-09-28)
 
-Workers Free, from [pricing](https://developers.cloudflare.com/d1/platform/pricing/) and [limits](https://developers.cloudflare.com/d1/platform/limits/) (pages updated 2026-04-21): **5 million rows read/day**, **100,000 rows written/day**, **5 GB storage** across all databases on the account, **500 MB per database**. Caps reset 00:00 UTC. Since [2026-09-01](https://developers.cloudflare.com/changelog/post/2026-09-01-d1-free-tier-limit-enforcement/) a query over the daily cap fails until reset. Rows read count rows scanned, and each index update bills an extra row written. The first build is a few hundred thousand `match_players` rows and, including those index writes, takes about **3 to 5 days** at the 100,000 rows-written/day cap. A free Worker may run **50 queries per invocation**. A [binding](https://developers.cloudflare.com/workers/runtime-apis/bindings/) (updated 2026-09-11) needs **no API token** in the Worker: `env.TENNIS_DB` is the permission. Wrangler on Nico’s Mac uses his existing login; that credential is not a Worker secret.
+Workers Free, from [pricing](https://developers.cloudflare.com/d1/platform/pricing/) and [limits](https://developers.cloudflare.com/d1/platform/limits/) (pages updated 2026-04-21): **5 million rows read/day**, **100,000 rows written/day**, **5 GB storage** across all databases on the account, **500 MB per database**. Caps reset 00:00 UTC. Since [2026-09-01](https://developers.cloudflare.com/changelog/post/2026-09-01-d1-free-tier-limit-enforcement/) a query over the daily cap fails until reset. Rows read count rows scanned, and each index update bills an extra row written. Step 5's API backfill is a few hundred thousand `match_players` rows and, including those index writes, takes about **4 to 6 days** at the job's 80,000 rows-written/day budget. A free Worker may run **50 queries per invocation**. A [binding](https://developers.cloudflare.com/workers/runtime-apis/bindings/) (updated 2026-09-11) needs **no API token** in the Worker: `env.TENNIS_DB` is the permission. Wrangler on Nico’s Mac uses his existing login; that credential is not a Worker secret.
 
 ## Inventory
 
@@ -25,8 +25,8 @@ Every `rapidFetch` path in `src/apiClient.js`, plus Sackmann imports and api-ten
 | Birthday, static profile | `GET /{tour}/player/profile/{id}` | `/api/players` (Player, panel); birthday on `/api/player-stats`; Curves vintage | edge+KV 72h / 30d / 24h | A. Current rank is B | `players` |
 | Titles | `GET /{tour}/player/titles/{id}` | `/api/player-stats`; folded into `/api/player-history` | count 72h; history payload 12h | A through last season; B this season | `player_totals` / `player_stats_blob` |
 | H2H summary | `GET /{tour}/h2h/info/{a}/{b}` | Hub featured pair only. `/api/h2h` sums the match log + past matches | inside the hub 5min payload | derived | current H2H store for v1 |
-| Sackmann match log | CSVs → `/api/admin/import-matches`, `tw:matches:v1:*` | `/api/h2h` | KV, no TTL, cap 4000 | A | `matches` + `match_players`, zero API |
-| Sackmann curves | vintage, career rank arcs, rank-by-age imports | Curves; Player rank chart | KV no TTL; rank-by-age also edge 24h | A | `players`, `matches`, `rankings` |
+| Sackmann match log | CSVs → `/api/admin/import-matches`, `tw:matches:v1:*` | `/api/h2h` | KV, no TTL, cap 4000 | A | H2H store stays in v1. Step 3 loads Sackmann seasons only for the `players` roster, for totals |
+| Sackmann curves | vintage, career rank arcs, rank-by-age imports | Curves; Player rank chart | KV no TTL; rank-by-age also edge 24h | A | roster only: `players`, `rankings`. Not the full match archive |
 | Live board | `GET /extend/api/events/live` | `/api/livescore`, `/api/hub` | edge 30s or 2min; `:seen` edge 12h; `:done` KV 12h only when the completed set changes; hub 5min | C | RapidAPI + edge. No D1 |
 | Per-event live score | `GET /extend/api/event/live-score/get/{id}` | none (`liveScoreByEventId` unused) | none | C | do not store |
 | api-tennis.com leftovers | `get_fixtures`, `get_tournaments`, `get_standings`, `get_players`. `get_H2H` has no caller | `/api/fixtures`, `/api/surface-standings` only from unmounted `script.js`. `/api/tournaments` has no page | edge+KV 24h / 48h / 24h. Profiles use another id namespace | out of scope | stay on KV. Do not copy into D1 or replace with RapidAPI |
@@ -89,7 +89,7 @@ player_stats_blob (player_id INTEGER PRIMARY KEY, built_at TEXT, json TEXT)
 - **`opp_rank`.** The job looks it up from `rankings` using the latest official `rank_date` on or before `match_date`. The hit rate is the 90% gate that decides whether the rank-band row ships in v1. Rank bands: `top10`, `11_50`, `51_100`, `101_plus`, `unknown`.
 - **Page read.** `player_stats_blob` is one row per player and the only table the public route reads (one indexed row per uncached view). `json` is capped at about 256 KB. `player_totals` and the blob are rebuilt in the same batch. Filtering happens in the browser.
 - **Rebuilds.** Idempotent: delete and reinsert each player's rows in one transaction.
-- **Size.** The first build is about 400 players, up to 500 matches each: a few hundred thousand `match_players` rows, two per match. Index writes count toward the 100,000 rows-written/day cap, and v1 has no opponent index, so the load is about **3 to 5 days**. That fits step 3 (cached KV + Sackmann, zero RapidAPI calls) before the step 5 API backfill, which waits for the quota reset on about 16 Oct 2026.
+- **Size.** The few hundred thousand `match_players` rows belong to step 5, the API backfill: about 400 players, up to 500 matches each, two rows per match. At the 80,000 rows-written/day job budget, including index writes and with no opponent index in v1, that is about **4 to 6 days**. Step 3 (cached KV + Sackmann, zero RapidAPI calls) loads only players already in `players` — the active roster plus roughly 180 legends — and only their Sackmann seasons for totals. The full Sackmann archive is not loaded in v1. H2H stays on its current store. Step 3's size depends on that roster and will be measured before the load.
 - **H2H.** Stays on the current H2H store for v1. No opponent index now: D1 bills every index update as a row written, which would slow the first build. After the D1 data passes the 20-match cross-source comparison, H2H can move to D1 with an index on `match_players (player_id, opponent_id)`. That also removes the ordered-pair caching that caused the Sinner–Alcaraz mismatch.
 - **Types and checks** (future migration, not this PR):
   - ID and grouping columns: `INTEGER NOT NULL` or `TEXT NOT NULL`. `won`, `has_stats`, `sv_games_est`, `lost_first_set`, `deciding_set`: `CHECK (x IN (0,1))`. `surface`, `level`, and `rank_band`: fixed lists, the same way `tournaments.surface` does.
@@ -132,9 +132,9 @@ player_stats_blob (player_id INTEGER PRIMARY KEY, built_at TEXT, json TEXT)
    ```
 
 2. Schema migration PR. Empty tables. The binding snippet lands here.
-3. Load data we already have, at zero API cost: KV `tw:matches:v1:*`, Sackmann CSVs, cached rankings and vintage.
+3. Load from cached KV and Sackmann at zero API cost, only for players already in `players`: the active roster plus roughly 180 legends, and only their Sackmann seasons for totals. Do not load the full Sackmann archive in v1. H2H stays on its current store. This step's size depends on that roster and will be measured before the load.
 4. Switch reads route by route. Edge cache stays in front. A miss reads D1 and does not write.
-5. API backfill of FINAL rows only after the quota reset (about 16 Oct 2026), under a daily call budget.
+5. API backfill of FINAL rows only after the quota reset (about 16 Oct 2026), under a daily call budget. This is the few hundred thousand `match_players` rows (about 400 players, up to 500 matches each). At the 80,000 rows-written/day job budget, including index writes, that takes about **4 to 6 days**. Both tours run in the same pass. The first build is about 400 calls plus a few older pages per player to find `first_api_season`, which fits within one month's 10,000 calls once live traffic is under control. If the daily call budget ever forces an order, WTA goes first, because it has no Sackmann history to fall back on.
 6. First D1 feature: `player_totals` and `player_stats_blob` (season, surface, level, rank band). The page reads the blob.
 
 ## Estimated savings
@@ -150,7 +150,6 @@ From the code, not from traffic. Miss counts are unmeasured and are not guessed.
 ## Open questions
 
 1. Is the reset still about 16 Oct 2026, and what daily call cap should step 5 use?
-2. Sackmann is ATP-only. WTA FINAL after the reset, or ATP first?
-3. Retire the api-tennis leftovers, or leave them on KV?
-4. In-progress draws on the 6h cron, or sooner? Livescore stays 30s either way.
-5. Is Time Travel (7 days) enough as the restore point, or also a SQL export?
+2. Retire the api-tennis leftovers, or leave them on KV?
+3. In-progress draws on the 6h cron, or sooner? Livescore stays 30s either way.
+4. Is Time Travel (7 days) enough as the restore point, or also a SQL export?
