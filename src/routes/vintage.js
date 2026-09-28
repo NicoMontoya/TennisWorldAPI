@@ -1,6 +1,7 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { calendarYearFor } from '../calendarYear.js';
+import { isQuotaStop } from '../quotaStop.js';
 
 // GET /api/vintage-roster?tour=ATP|WTA        → { roster }
 // GET /api/player-vintage?tour=ATP|WTA&playerKey=47275 → { player, points, totals }
@@ -75,7 +76,11 @@ async function getTierMap(env, tour, years) {
 
         let cal;
         try { cal = await calendarYearFor(env, tour, year); }
-        catch { continue; }   // one bad year must not sink the whole curve
+        catch (err) {
+            // A hard stop is not a bad year — don't cache an empty tier map.
+            if (isQuotaStop(err)) throw err;
+            continue;   // one bad year must not sink the whole curve
+        }
 
         const yearMap = {};
         for (const t of (cal?.data || [])) {

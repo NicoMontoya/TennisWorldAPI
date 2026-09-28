@@ -20,6 +20,7 @@ import { handleVintageRoster, handlePlayerVintage, handleImportVintage } from '.
 import { handleVintageRankByAge, handleImportVintageRankByAge } from './routes/vintageRankByAge.js';
 import { handlePlayerRankHistory, seedRankSnapshots } from './routes/playerRankHistory.js';
 import { getCalendarYear } from './calendarYear.js';
+import { isQuotaStop } from './quotaStop.js';
 import { handleBackfillRankings, handleClearRankHistory, handleImportRankHistory, handleImportMatches } from './routes/adminBackfill.js';
 import { handleImportOfficialDraw } from './routes/officialDrawAdmin.js';
 import { handleRankingsHistory, handleImportRankingsHistory } from './routes/rankingsHistory.js';
@@ -184,7 +185,10 @@ export default {
         } catch (err) {
             console.error(`[${pathname}]`, err.message);
             const status = err.status || 500;
-            return jsonResponse({ ok: false, error: err.message }, status, env, request);
+            // QuotaStopError's message is already generic. Force it anyway so a
+            // remaining count or stop flag can never reach the client.
+            const message = isQuotaStop(err) ? 'Upstream request failed' : err.message;
+            return jsonResponse({ ok: false, error: message }, status, env, request);
         }
     },
 };

@@ -66,6 +66,10 @@ async function getTournamentMap(env, tour) {
         }
     }
 
+    // Same shared key as player stats / history. Don't persist an empty map
+    // when every year failed (hard stop or upstream down).
+    if (!results.some(r => r.status === 'fulfilled')) return {};
+
     await cache.set(env, TTL_CALENDAR, map, ...ckey);
     return map;
 }
@@ -270,7 +274,9 @@ export async function handleH2H(request, env) {
             surfaceSplits: computeSplits(h2hMatches, playerKeyA),
         };
 
-        await cache.set(env, TTL.h2h, data, ...cacheArgs);
+        // pastResult is null when the live call failed (including a hard stop).
+        // Return the KV-backed or empty result without pinning it for 48h.
+        if (pastResult) await cache.set(env, TTL.h2h, data, ...cacheArgs);
         return data;
 
     } catch (err) {

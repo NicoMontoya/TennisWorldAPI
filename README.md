@@ -116,13 +116,26 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
   raises this to 1M/day.
 - **Requests: 100,000/day** on the free plan — plenty to start.
 - **RapidAPI / MatchStat plan limits** — Scores live uses the existing `RAPIDAPI_KEY`
-  Worker secret (30s TTL). Leftover api-tennis.com routes still use `TENNIS_API_KEY`.
+  Worker secret (60s edge TTL while anything is live, scheduled, or delayed).
+  Leftover api-tennis.com routes still use `TENNIS_API_KEY`.
+- **`RAPIDAPI_HARD_STOP`** (`wrangler.toml` `[vars]`, ships as `off`). `on` stops
+  new RapidAPI calls after a response shows the monthly quota is exhausted
+  (`x-ratelimit-requests-remaining` missing, non-numeric, zero, or negative).
+  `off` never stops. `force` stops immediately. Unset is `off`. There is no
+  route to change it. The shared flag is one KV write (`{until}`), read back
+  through a 60s edge cache. A missing remaining-header on 3 consecutive
+  responses in one location also stops that location locally (edge only, no
+  extra KV write). Reset seconds clamp to 60s–31 days; a missing reset rechecks
+  in 24h. With the stop on, visitors get cached or stale rankings, draws, and
+  results; live scores stay frozen on the last edge payload; pages with nothing
+  cached return their usual empty body or a generic upstream 503. Responses
+  never include the remaining count, the reset, or whether the stop is on.
 
 ## Security notes
 
 - `/api/admin/*` routes require `ADMIN_SECRET` (secret, never a var) and fail closed when unset.
 - Auth: PBKDF2 (100k iters, per-user salt), 30-day KV sessions, Bearer tokens.
 - Register/login are rate-limited per IP (best-effort KV counter, 10 per 10 min).
-- `GET /api/hub` and `GET /api/livescore` are rate-limited per IP via the Cache API (`https://rl.internal/{hub|livescore}/{ip}`, 60 per 60s). Livescore cache is 30s when matches are live or still scheduled today, and 2 min only when the board is finished-only / empty; hub stays 5 min (live overlay from the livescore cache on hit). Auth register/login remain on a KV counter.
+- `GET /api/hub` and `GET /api/livescore` are rate-limited per IP via the Cache API (`https://rl.internal/{hub|livescore}/{ip}`, 60 per 60s). Livescore cache is 60s when matches are live, scheduled, or delayed, and 2 min only when the board is finished-only / empty; hub stays 5 min (live overlay from the livescore cache on hit). Auth register/login remain on a KV counter.
 - `tour` on hub/livescore/draws is ATP|WTA only. `tournamentKey` on livescore/draws/fixtures is digits-only (`/^\d{1,20}$/`).
 - `.dev.vars` is git-ignored; no secrets in `wrangler.toml` or frontend JS.
