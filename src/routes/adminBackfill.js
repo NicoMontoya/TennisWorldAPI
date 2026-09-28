@@ -1,4 +1,5 @@
 import { rapidAPI }                              from '../apiClient.js';
+import { isQuotaStop }                           from '../quotaStop.js';
 import { cache }                                 from '../cache.js';
 import { readHistory, writeHistory, appendSnapshot, KV_MAX_ENTRIES } from './playerRankHistory.js';
 import { readMatchLog, writeMatchLog, mergeMatches } from './playerMatches.js';
@@ -191,6 +192,12 @@ export async function handleBackfillRankings(request, env) {
             }
             log.push(`${date}: ${count} players`);
         } catch (e) {
+            // Hard stop: do not walk the rest of the weeks, and do not log
+            // anything but a generic upstream failure.
+            if (isQuotaStop(e)) {
+                log.push(`${date}: upstream unavailable`);
+                break;
+            }
             log.push(`${date}: ERROR — ${e.message}`);
         }
         await sleep(CALL_DELAY);

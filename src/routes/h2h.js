@@ -1,6 +1,7 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
+import { calendarYearFor } from '../calendarYear.js';
 import { readMatchLog, mergeMatches } from './playerMatches.js';
 
 // Ordered-pair Cache API/KV namespace. Bump when H2H computation or match-log
@@ -54,7 +55,7 @@ async function getTournamentMap(env, tour) {
     const years = [year, year - 1, year - 2, year - 3, year - 4];
 
     const results = await Promise.allSettled(
-        years.map(y => rapidAPI.calendar(env, tour, y))
+        years.map(y => calendarYearFor(env, tour, y))
     );
 
     const map = {};
@@ -64,6 +65,10 @@ async function getTournamentMap(env, tour) {
             if (t.id) map[t.id] = { name: t.name || '', surface: normSurface(t.court?.name) };
         }
     }
+
+    // Same shared key as player stats / history. Don't persist an empty map
+    // when every year failed (hard stop or upstream down).
+    if (!results.some(r => r.status === 'fulfilled')) return {};
 
     await cache.set(env, TTL_CALENDAR, map, ...ckey);
     return map;
@@ -269,7 +274,9 @@ export async function handleH2H(request, env) {
             surfaceSplits: computeSplits(h2hMatches, playerKeyA),
         };
 
-        await cache.set(env, TTL.h2h, data, ...cacheArgs);
+        // pastResult is null when the live call failed (including a hard stop).
+        // Return the KV-backed or empty result without pinning it for 48h.
+        if (pastResult) await cache.set(env, TTL.h2h, data, ...cacheArgs);
         return data;
 
     } catch (err) {

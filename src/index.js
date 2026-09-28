@@ -6,7 +6,7 @@
 
 import { handleStandings }        from './routes/standings.js';
 import { handlePlayerStats }      from './routes/playerStats.js';
-import { handleLivescore }        from './routes/livescore.js';
+import { handleLivescore, recallLivescoreFetchedAt } from './routes/livescore.js';
 import { handleFixtures }         from './routes/fixtures.js';
 import { handlePlayer }           from './routes/players.js';
 import { handleH2H }              from './routes/h2h.js';
@@ -19,6 +19,9 @@ import { handlePlayerHistory }     from './routes/playerHistory.js';
 import { handleVintageRoster, handlePlayerVintage, handleImportVintage } from './routes/vintage.js';
 import { handleVintageRankByAge, handleImportVintageRankByAge } from './routes/vintageRankByAge.js';
 import { handlePlayerRankHistory, seedRankSnapshots } from './routes/playerRankHistory.js';
+import { getCalendarYear } from './calendarYear.js';
+import { isQuotaStop } from './quotaStop.js';
+import { LIVESCORE_FETCHED_AT_UNKNOWN, normalizeFetchedAt, takeFetchedAt } from './fetchedAt.js';
 import { handleBackfillRankings, handleClearRankHistory, handleImportRankHistory, handleImportMatches } from './routes/adminBackfill.js';
 import { handleImportOfficialDraw } from './routes/officialDrawAdmin.js';
 import { handleRankingsHistory, handleImportRankingsHistory } from './routes/rankingsHistory.js';
@@ -105,35 +108,47 @@ function corsHeaders(env, request) {
 }
 
 // ── Cron: background KV cache refresh ────────────────────────────────────────
-// Triggered every 6h by wrangler.toml [[triggers.crons]].
-// Warms the two slowest / least-volatile endpoints so the first user of the day
-// always gets a fast cached response instead of a cold upstream fetch.
-async function handleScheduled(env) {
+// Triggered every 6h by wrangler.toml [[triggers.crons]] (`0 */6 * * *`).
+// Standings stay warm on every run. Rank snapshots run only when the
+// scheduled UTC hour is 12, and only for a feed ranking date that is not
+// already stored (no rewrite of the same week).
+// The calendar warm used to call /api/calendar with a date window nobody
+// else requests; it now fills getCalendarYear for the current year.
+export const RANK_SEED_UTC_HOUR = 12;
+
+function scheduledInstant(event) {
+    const raw = event && typeof event === 'object' && 'scheduledTime' in event
+        ? event.scheduledTime
+        : event;
+    if (raw instanceof Date) return new Date(raw.getTime());
+    if (typeof raw === 'number' && Number.isFinite(raw)) return new Date(raw);
+    return new Date();
+}
+
+export async function handleScheduled(env, event) {
     const TOURS = ['ATP', 'WTA'];
     const results = [];
+    const when = scheduledInstant(event);
+    const seedRanks = when.getUTCHours() === RANK_SEED_UTC_HOUR;
 
     for (const tour of TOURS) {
-        // Standings + seed rank snapshots for top-50
+        // Standings every run. Rank snapshots only at RANK_SEED_UTC_HOUR.
         try {
             const req  = new Request(`https://placeholder/api/standings?tour=${tour}`);
             const data = await handleStandings(req, env);
             results.push(`standings:${tour}:ok`);
-            if (Array.isArray(data)) {
+            if (seedRanks && Array.isArray(data)) {
                 await seedRankSnapshots(env, tour, data.slice(0, 50));
                 results.push(`rank-seed:${tour}:ok`);
+            } else if (Array.isArray(data)) {
+                results.push(`rank-seed:${tour}:skip`);
             }
         } catch (e) {
             results.push(`standings:${tour}:err:${e.message}`);
         }
 
-        // Calendar (current month ±7 days)
         try {
-            const today = new Date();
-            const start = new Date(today); start.setDate(today.getDate() - 7);
-            const stop  = new Date(today); stop.setDate(today.getDate() + 30);
-            const fmt   = d => d.toISOString().split('T')[0];
-            const req   = new Request(`https://placeholder/api/calendar?tour=${tour}&dateStart=${fmt(start)}&dateStop=${fmt(stop)}`);
-            await handleCalendar(req, env);
+            await getCalendarYear(env, tour, when.getFullYear(), when);
             results.push(`calendar:${tour}:ok`);
         } catch (e) {
             results.push(`calendar:${tour}:err:${e.message}`);
@@ -145,8 +160,8 @@ async function handleScheduled(env) {
 
 // ── Main fetch handler ────────────────────────────────────────────────────────
 export default {
-    async scheduled(_event, env) {
-        await handleScheduled(env);
+    async scheduled(event, env) {
+        await handleScheduled(env, event);
     },
 
     async fetch(request, env) {
@@ -167,19 +182,55 @@ export default {
 
         try {
             const data = await handler(request, env);
-            return jsonResponse({ ok: true, data }, 200, env, request);
+            // Scores polls /api/livescore and still expects data to be the match
+            // array. The upstream time is a response header, not a body field.
+            // The header is always set so a missing header cannot signal a stop.
+            const extra = livescoreFetchedAtHeaders(pathname, request, takeFetchedAt(data));
+            return jsonResponse({ ok: true, data }, 200, env, request, extra);
         } catch (err) {
             console.error(`[${pathname}]`, err.message);
             const status = err.status || 500;
-            return jsonResponse({ ok: false, error: err.message }, status, env, request);
+            // QuotaStopError's message is already generic. Force it anyway so a
+            // remaining count or stop flag can never reach the client.
+            const message = isQuotaStop(err) ? 'Upstream request failed' : err.message;
+            const extra = livescoreFetchedAtHeaders(
+                pathname,
+                request,
+                thrownLivescoreFetchedAt(request),
+            );
+            return jsonResponse({ ok: false, error: message }, status, env, request, extra);
         }
     },
 };
 
-function jsonResponse(body, status, env, request) {
+function thrownLivescoreFetchedAt(request) {
+    try {
+        const { searchParams } = new URL(request.url);
+        return recallLivescoreFetchedAt(
+            searchParams.get('tour'),
+            searchParams.get('tournamentKey'),
+        ) || LIVESCORE_FETCHED_AT_UNKNOWN;
+    } catch {
+        return LIVESCORE_FETCHED_AT_UNKNOWN;
+    }
+}
+
+function livescoreFetchedAtHeaders(pathname, request, fetchedAt) {
+    if (pathname !== '/api/livescore') return undefined;
+    const headers = { 'X-Fetched-At': normalizeFetchedAt(fetchedAt) };
+    // Cross-origin readers (localhost dev, or a CORS_ORIGIN host) cannot see
+    // this header unless it is exposed. Same-origin GETs omit Origin.
+    if (request && request.headers.get('Origin')) {
+        headers['Access-Control-Expose-Headers'] = 'X-Fetched-At';
+    }
+    return headers;
+}
+
+function jsonResponse(body, status, env, request, extraHeaders) {
     const headers = {
         'Content-Type': 'application/json',
         ...corsHeaders(env, request),
+        ...(extraHeaders || {}),
     };
     const method = request && request.method;
     if ((method === 'GET' || method === 'POST') && PRIVATE_NO_STORE.has(new URL(request.url).pathname)) {

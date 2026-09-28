@@ -1,6 +1,5 @@
-import { cache }    from '../cache.js';
-import { rapidAPI } from '../apiClient.js';
-import { TTL }      from '../config.js';
+import { getCalendarYear } from '../calendarYear.js';
+import { parseTour } from '../security.js';
 
 // court.name → surface label
 function parseSurface(courtName) {
@@ -41,9 +40,12 @@ function tierPriority(tier) {
 }
 
 // GET /api/calendar?tour=ATP|WTA&dateStart=YYYY-MM-DD&dateStop=YYYY-MM-DD
+// The body is still the filtered week (or the requested window). The upstream
+// read is the shared yearly cache; dateStart/dateStop are applied in memory
+// and are not part of any cache key.
 export async function handleCalendar(request, env) {
     const { searchParams } = new URL(request.url);
-    const tour = (searchParams.get('tour') || 'ATP').toUpperCase();
+    const tour = parseTour(searchParams.get('tour'));
 
     let dateStart = searchParams.get('dateStart');
     let dateStop  = searchParams.get('dateStop');
@@ -58,26 +60,18 @@ export async function handleCalendar(request, env) {
         dateStop  = sunday.toISOString().split('T')[0];
     }
 
-    const cacheKey = ['calendar2', tour, dateStart, dateStop];
-    const cached   = await cache.get(env, ...cacheKey);
-    if (cached) return cached.data;
-
-    // Determine which years to fetch (date range may span a year boundary)
+    // Determine which years to fetch (date range may span a year boundary).
+    // A year outside current ±1 400s inside getCalendarYear and does not
+    // create a cache key or call RapidAPI.
     const startYear = new Date(dateStart).getFullYear();
     const stopYear  = new Date(dateStop).getFullYear();
     const years     = [...new Set([startYear, stopYear])];
 
     let allTournaments = [];
-    try {
-        const pages = await Promise.all(years.map(y => rapidAPI.calendar(env, tour, y)));
-        for (const page of pages) {
-            const items = page?.data || (Array.isArray(page) ? page : []);
-            allTournaments = allTournaments.concat(items);
-        }
-    } catch (err) {
-        const stale = await cache.getStale(env, ...cacheKey);
-        if (stale) return stale.data;
-        throw err;
+    const pages = await Promise.all(years.map(y => getCalendarYear(env, tour, y)));
+    for (const page of pages) {
+        const items = page?.data || (Array.isArray(page) ? page : []);
+        allTournaments = allTournaments.concat(items);
     }
 
     // Filter to tournaments whose date falls within the requested range.
@@ -132,6 +126,5 @@ export async function handleCalendar(request, env) {
         return (b.startDate || '').localeCompare(a.startDate || '');
     });
 
-    await cache.set(env, 2 * 60 * 60, tournaments, ...cacheKey);
     return tournaments;
 }

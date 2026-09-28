@@ -1,6 +1,7 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
+import { getCalendarYear } from '../calendarYear.js';
 import { parseTour, rateLimit } from '../security.js';
 import {
     filterLiveEvents,
@@ -74,15 +75,14 @@ export async function handleHub(request, env) {
     const cached = await cache.get(env, ...cacheKey);
     if (cached) return overlayHubFromLivescoreCache(env, tour, cached.data);
 
-    // 1. Fetch this year's calendar (and previous if we're in Jan)
+    // 1. This year's calendar (and previous if we're in Jan), from the shared
+    // 24h yearly cache. Filter to the active window in memory.
     const now  = new Date();
     const year = now.getFullYear();
     let calendarItems = [];
     try {
-        const years = year === now.getFullYear() && now.getMonth() === 0
-            ? [year - 1, year]
-            : [year];
-        const pages = await Promise.all(years.map(y => rapidAPI.calendar(env, tour, y)));
+        const years = now.getMonth() === 0 ? [year - 1, year] : [year];
+        const pages = await Promise.all(years.map(y => getCalendarYear(env, tour, y, now)));
         for (const p of pages) {
             const items = p?.data || (Array.isArray(p) ? p : []);
             calendarItems = calendarItems.concat(items);

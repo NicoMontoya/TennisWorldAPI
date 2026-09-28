@@ -245,7 +245,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
         expect(data.find(m => m.isLive).tournamentKey).toBe('20340');
     });
 
-    it('uses 30s TTL on match-day fixtures-only so new InPlay is not trapped for 120s', async () => {
+    it('uses 60s TTL on match-day fixtures-only so new InPlay is not trapped for 120s', async () => {
         const setSpy = vi.spyOn(cache, 'set');
         const edgeSpy = vi.spyOn(cache, 'setEdge');
         installFetch({ liveEvents: [] });
@@ -258,6 +258,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
             'livescore3',
             'ATP',
             'all',
+            expect.objectContaining({ fetchedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) }),
         );
         expect(setSpy).not.toHaveBeenCalledWith(
             env,
@@ -268,13 +269,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
             'all',
             expect.anything(),
         );
-        expect(edgeSpy).not.toHaveBeenCalledWith(
-            TTL.livescoreIdle,
-            expect.anything(),
-            expect.anything(),
-            expect.anything(),
-            expect.anything(),
-        );
+        expect(edgeSpy.mock.calls.filter(c => c[0] === TTL.livescoreIdle)).toEqual([]);
 
         edgeSpy.mockClear();
         env.TENNIS_CACHE._store.clear();
@@ -287,6 +282,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
             'livescore3',
             'ATP',
             'all',
+            expect.objectContaining({ fetchedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) }),
         );
     });
 
@@ -318,6 +314,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
             'livescore3',
             'ATP',
             'all',
+            expect.objectContaining({ fetchedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) }),
         );
     });
 
