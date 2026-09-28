@@ -132,9 +132,13 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
   results; live scores stay frozen on the last edge payload; pages with nothing
   cached return their usual empty body or a generic upstream 503. Responses
   never include the remaining count, the reset, or whether the stop is on.
-  `/api/livescore` and `/api/hub` also include a top-level `fetchedAt` string
-  (ISO 8601 UTC, worker clock at the successful upstream fetch). Cache hits
-  and quota-stop fallbacks return that original time, not the serve time.
+  `GET /api/livescore` adds one response header, `X-Fetched-At`: an ISO 8601
+  UTC string from the Worker clock at the successful upstream fetch, stored
+  with the edge payload so a cache hit or quota-stop read of that entry
+  returns the original time. The JSON body is unchanged (`data` stays the
+  match array). The Scores page polls this route, not `/api/hub`, so the hub
+  response does not carry the header. A cross-origin livescore response also
+  lists that name in `Access-Control-Expose-Headers`.
 
 ## Security notes
 

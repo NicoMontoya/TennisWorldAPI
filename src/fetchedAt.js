@@ -1,7 +1,6 @@
-// Non-enumerable stamp so a route can carry the upstream fetch time to the
-// HTTP layer without adding a field on a match array or a hub object.
-// index.js copies it to the response as top-level `fetchedAt` and JSON
-// leaves the symbol off `data`.
+// Non-enumerable stamp so /api/livescore can carry the upstream fetch time
+// to the HTTP layer. index.js copies it to the X-Fetched-At response header.
+// JSON.stringify leaves the symbol off the match array.
 
 const FETCHED_AT = Symbol.for('tw.fetchedAt');
 

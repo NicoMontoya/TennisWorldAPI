@@ -182,12 +182,22 @@ export default {
 
         try {
             const data = await handler(request, env);
-            const body = { ok: true, data };
-            // Livescore (and hub, when it is serving live scores) stamps the
-            // upstream fetch time. One field, no quota or stop state.
-            const fetchedAt = takeFetchedAt(data);
-            if (fetchedAt) body.fetchedAt = fetchedAt;
-            return jsonResponse(body, 200, env, request);
+            // Scores polls /api/livescore and still expects data to be the match
+            // array. The upstream time is a response header, not a body field.
+            const extra = {};
+            if (pathname === '/api/livescore') {
+                const fetchedAt = takeFetchedAt(data);
+                if (fetchedAt && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(fetchedAt)) {
+                    extra['X-Fetched-At'] = fetchedAt;
+                    // Cross-origin readers (localhost dev, or a CORS_ORIGIN host)
+                    // cannot see this header unless it is exposed. Same-origin
+                    // GETs omit Origin, so they do not get the extra CORS header.
+                    if (request.headers.get('Origin')) {
+                        extra['Access-Control-Expose-Headers'] = 'X-Fetched-At';
+                    }
+                }
+            }
+            return jsonResponse({ ok: true, data }, 200, env, request, extra);
         } catch (err) {
             console.error(`[${pathname}]`, err.message);
             const status = err.status || 500;
@@ -199,10 +209,11 @@ export default {
     },
 };
 
-function jsonResponse(body, status, env, request) {
+function jsonResponse(body, status, env, request, extraHeaders) {
     const headers = {
         'Content-Type': 'application/json',
         ...corsHeaders(env, request),
+        ...(extraHeaders || {}),
     };
     const method = request && request.method;
     if ((method === 'GET' || method === 'POST') && PRIVATE_NO_STORE.has(new URL(request.url).pathname)) {
