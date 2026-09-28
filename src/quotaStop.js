@@ -13,16 +13,21 @@
 // not a KV read on every request. A flag read that throws fails closed (no
 // paid call).
 //
-// Bookkeeping runs only for 2xx responses, plus 429 (a 429 trips the shared
-// flag immediately). Other non-2xx responses, including 4xx/5xx and gateway
-// errors, are ignored so a blip cannot stop the site for 24h.
-// A 2xx that carries x-ratelimit-requests-remaining and is non-numeric, zero,
-// or negative is exhausted and trips the shared flag at once.
-// A 2xx with the header missing increments this location's miss streak.
-// The shared flag is written only when that streak reaches
-// QUOTA_HEADER_MISS_THRESHOLD (3). The same threshold also stops the isolate
-// locally. The counter lives in the Cache API only (10 min TTL). The local
-// stop lasts for the clamped reset (default 24h when reset is missing).
+// The consecutive-miss counter is a per-location Cache API entry, never KV.
+// It increments on a 2xx whose remaining header is missing. It resets only
+// on a 2xx that carries a valid remaining count (a finite number above zero).
+// Errors, other non-2xx responses, and header-less responses do not reset it,
+// so a 5xx between misses cannot clear the streak. At
+// QUOTA_HEADER_MISS_THRESHOLD (3) the shared flag is written and this
+// location also stops locally. The local stop lasts for the clamped reset
+// (default 24h when reset is missing).
+// A response that carries the remaining header and is non-numeric, zero, or
+// negative is exhausted and trips the shared flag, on 2xx and on non-2xx.
+// A header-less non-2xx does not trip. 429 always trips.
+// Every fetch that actually leaves this isolate increments a separate
+// per-location call tally in the Cache API, including 5xx and thrown
+// fetches. Skipping the shared-stop trip does not make that call free.
+// `force` never fetches, so it does not increment the tally.
 //
 // x-ratelimit-requests-reset is seconds. It is clamped to 60s–31 days.
 // Missing or non-numeric reset uses 24h.
@@ -38,6 +43,8 @@ const FLAG_EDGE = 'https://quota.internal/stop';
 const LOCAL_STOP_EDGE = 'https://quota.internal/local-stop';
 const MISS_STREAK_EDGE = 'https://quota.internal/miss-streak';
 const MISS_STREAK_TTL = 10 * 60;
+export const QUOTA_CALL_TALLY_EDGE = 'https://quota.internal/call-tally';
+const CALL_TALLY_TTL = 24 * 60 * 60;
 
 // One isolate must not write the shared flag more than once per trip.
 let claimedUntil = 0;
@@ -219,34 +226,58 @@ function headerValue(response, name) {
     }
 }
 
-/** After a RapidAPI response. No-op unless the setting is `on`. */
+async function bumpCallTally() {
+    let count = 0;
+    try {
+        const cur = await edgeGet(QUOTA_CALL_TALLY_EDGE);
+        count = Number(cur?.count) || 0;
+    } catch {
+        count = 0;
+    }
+    count += 1;
+    try {
+        await edgePut(QUOTA_CALL_TALLY_EDGE, { count }, CALL_TALLY_TTL);
+    } catch { /* tally is best-effort and never KV */ }
+}
+
+/** One real upstream attempt. Edge only. Does not trip the shared stop. */
+export async function noteUpstreamCall() {
+    await bumpCallTally();
+}
+
+/** After a RapidAPI response. Trip logic is a no-op unless the setting is `on`. */
 export async function noteRapidQuota(env, response) {
     if (hardStopMode(env) !== 'on') return;
     const status = Number(response?.status);
+    const is2xx = Number.isFinite(status) && status >= 200 && status < 300;
     const reset = headerValue(response, 'x-ratelimit-requests-reset');
-    // 429 is a trip even when the remaining header still looks healthy.
-    // Every other non-2xx is ignored (no streak, no flag).
+    const state = classifyRemaining(headerValue(response, 'x-ratelimit-requests-remaining'));
+
+    // 429 trips even when remaining still looks healthy. Do not reset the streak.
     if (status === 429) {
         await tripLocal(clampQuotaReset(reset));
         await tripShared(env, reset);
         return;
     }
-    if (!Number.isFinite(status) || status < 200 || status >= 300) return;
 
-    const state = classifyRemaining(headerValue(response, 'x-ratelimit-requests-remaining'));
+    // A carried header is read on every status. Zero, negative, or non-numeric
+    // is exhausted. A valid count does not trip and, unless this is 2xx, does
+    // not reset the miss streak either.
+    if (state === 'exhausted') {
+        await tripShared(env, reset);
+        return;
+    }
     if (state === 'ok') {
-        await resetMissStreak();
+        if (is2xx) await resetMissStreak();
         return;
     }
-    if (state === 'missing') {
-        const count = await bumpMissStreak();
-        if (count >= QUOTA_HEADER_MISS_THRESHOLD) {
-            await tripLocal(clampQuotaReset(reset));
-            await tripShared(env, reset);
-        }
-        return;
+
+    // Header-less. Only a 2xx counts as a consecutive miss. Anything else
+    // leaves the streak where it is and does not trip.
+    if (!is2xx) return;
+    const count = await bumpMissStreak();
+    if (count >= QUOTA_HEADER_MISS_THRESHOLD) {
+        await tripLocal(clampQuotaReset(reset));
+        await tripShared(env, reset);
     }
-    // Header present, but non-numeric, zero, or negative: exhausted now.
-    await resetMissStreak();
-    await tripShared(env, reset);
 }

@@ -21,7 +21,7 @@
 
 import { getMock } from './mocks/index.js';
 import { unwrapLiveEvents } from './transforms/matchstatLive.js';
-import { isHardStopActive, isQuotaStop, noteRapidQuota, QuotaStopError } from './quotaStop.js';
+import { isHardStopActive, isQuotaStop, noteRapidQuota, noteUpstreamCall, QuotaStopError } from './quotaStop.js';
 
 const BASE         = 'https://api.api-tennis.com/tennis/';
 const MAX_RETRIES  = 3;
@@ -161,8 +161,12 @@ async function rapidFetch(env, path, attempt = 1) {
             signal,
         });
     } catch {
+        // The attempt left the isolate. Count it even though there is no
+        // response to read a quota header from.
+        try { await noteUpstreamCall(); } catch { /* tally must not change the error */ }
         throw new Error('Upstream request failed');
     }
+    try { await noteUpstreamCall(); } catch { /* tally must not change the response */ }
     try {
         await noteRapidQuota(env, res);
     } catch { /* quota bookkeeping must not change the response */ }
