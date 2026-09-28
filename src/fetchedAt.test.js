@@ -1,6 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { cache } from './cache.js';
-import { TTL } from './config.js';
 import worker from './index.js';
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -40,7 +38,7 @@ function mockEnv() {
     const store = new Map();
     return {
         RAPIDAPI_KEY: 'dummy-rapidapi-key',
-        CORS_ORIGIN: '*',
+        CORS_ORIGIN: 'https://tennisworld-api.nicomontoya.workers.dev',
         TENNIS_CACHE: {
             async get(key, type) {
                 const raw = store.get(key);
@@ -56,17 +54,52 @@ function mockEnv() {
     };
 }
 
-function get(path) {
-    return new Request(`https://example.test${path}`, {
-        headers: { 'CF-Connecting-IP': '203.0.113.77' },
-    });
+function get(path, origin) {
+    const headers = { 'CF-Connecting-IP': '203.0.113.77' };
+    if (origin) headers.Origin = origin;
+    return new Request(`https://example.test${path}`, { headers });
 }
 
 function jsonRes(body, status = 200) {
     return new Response(JSON.stringify(body), { status });
 }
 
-describe('fetchedAt', () => {
+function installUpstream() {
+    const calls = [];
+    globalThis.fetch = vi.fn(async (url) => {
+        calls.push(String(url));
+        const u = String(url);
+        if (u.includes('/extend/api/events/live')) {
+            return jsonRes({
+                success: true,
+                results: [{
+                    id: '3815731',
+                    name: 'J. Sinner vs C. Alcaraz',
+                    participant1: 'J. Sinner',
+                    participant2: 'C. Alcaraz',
+                    league: 'US Open',
+                    score: '6-4, 3-2',
+                    status: 'InPlay',
+                    points: '30-15',
+                    tourType: 'ATP',
+                    startTimestamp: 1757180000,
+                    matchId: '2072-2315-20340-12',
+                }],
+                count: 1,
+            });
+        }
+        if (u.includes('/tournament/calendar') && /pageNo=1/.test(u)) {
+            return jsonRes({ data: [{ id: 20340, name: 'US Open', tier: 'Grand Slam', date: '2026-09-28' }] });
+        }
+        if (u.includes('/tournament/calendar')) return jsonRes({ data: [] });
+        if (u.includes('/fixtures/tournament/')) return jsonRes({ data: [] });
+        if (u.includes('/tournament/results/')) return jsonRes({ data: { singles: [] } });
+        return jsonRes({}, 404);
+    });
+    return calls;
+}
+
+describe('X-Fetched-At', () => {
     beforeEach(() => {
         installMockCaches();
         vi.useFakeTimers({ toFake: ['Date'] });
@@ -79,96 +112,56 @@ describe('fetchedAt', () => {
         delete globalThis.fetch;
     });
 
-    it('returns the original livescore fetchedAt on a cache hit and under a hard stop', async () => {
-        const calls = [];
-        globalThis.fetch = vi.fn(async (url) => {
-            calls.push(String(url));
-            const u = String(url);
-            if (u.includes('/extend/api/events/live')) {
-                return jsonRes({
-                    success: true,
-                    results: [{
-                        id: '3815731',
-                        name: 'J. Sinner vs C. Alcaraz',
-                        participant1: 'J. Sinner',
-                        participant2: 'C. Alcaraz',
-                        league: 'US Open',
-                        score: '6-4, 3-2',
-                        status: 'InPlay',
-                        points: '30-15',
-                        tourType: 'ATP',
-                        startTimestamp: 1757180000,
-                        matchId: '2072-2315-20340-12',
-                    }],
-                    count: 1,
-                });
-            }
-            if (u.includes('/tournament/calendar') && /pageNo=1/.test(u)) {
-                return jsonRes({ data: [{ id: 20340, name: 'US Open', tier: 'Grand Slam', date: '2026-09-28' }] });
-            }
-            if (u.includes('/tournament/calendar')) return jsonRes({ data: [] });
-            if (u.includes('/fixtures/tournament/')) return jsonRes({ data: [] });
-            if (u.includes('/tournament/results/')) return jsonRes({ data: { singles: [] } });
-            return jsonRes({}, 404);
-        });
-
+    it('sets the header on a fresh livescore fetch and reuses it on cache hit and quota stop', async () => {
+        const calls = installUpstream();
         const env = mockEnv();
+
         const firstRes = await worker.fetch(get('/api/livescore?tour=ATP'), env);
         const first = await firstRes.json();
         expect(firstRes.status).toBe(200);
-        expect(first.fetchedAt).toBe(FIRST);
-        expect(first.fetchedAt).toMatch(ISO);
-        expect(Object.keys(first).sort()).toEqual(['data', 'fetchedAt', 'ok']);
+        expect(firstRes.headers.get('X-Fetched-At')).toBe(FIRST);
+        expect(firstRes.headers.get('X-Fetched-At')).toMatch(ISO);
+        expect(firstRes.headers.get('Access-Control-Expose-Headers')).toBeNull();
+        expect(Object.keys(first).sort()).toEqual(['data', 'ok']);
         expect(Array.isArray(first.data)).toBe(true);
-        expect(JSON.stringify(first.data)).not.toContain('fetchedAt');
-        expect(JSON.stringify(first)).not.toMatch(/quota|ratelimit|hard stop/i);
+        expect(JSON.stringify(first)).not.toMatch(/fetchedAt|quota|ratelimit|hard stop/i);
         const fetchesAfterFill = calls.length;
         expect(fetchesAfterFill).toBeGreaterThan(0);
 
         vi.setSystemTime(new Date(LATER));
         const secondRes = await worker.fetch(get('/api/livescore?tour=ATP'), env);
         const second = await secondRes.json();
-        expect(second.fetchedAt).toBe(FIRST);
+        expect(secondRes.headers.get('X-Fetched-At')).toBe(FIRST);
         expect(second.data).toEqual(first.data);
+        expect(Object.keys(second).sort()).toEqual(['data', 'ok']);
         expect(calls).toHaveLength(fetchesAfterFill);
 
         env.RAPIDAPI_HARD_STOP = 'force';
         vi.setSystemTime(new Date('2026-09-28T15:20:00.000Z'));
         const stoppedRes = await worker.fetch(get('/api/livescore?tour=ATP'), env);
         const stopped = await stoppedRes.json();
-        expect(stopped.fetchedAt).toBe(FIRST);
+        expect(stoppedRes.headers.get('X-Fetched-At')).toBe(FIRST);
+        expect(Object.keys(stopped).sort()).toEqual(['data', 'ok']);
         expect(calls).toHaveLength(fetchesAfterFill);
         for (const [k, v] of stoppedRes.headers) {
-            expect(`${k}: ${v}`).not.toMatch(/fetchedAt|quota|ratelimit/i);
+            expect(`${k}: ${v}`).not.toMatch(/quota|ratelimit|hard stop|-6004/i);
         }
     });
 
-    it('returns the original hub live fetchedAt on a cache hit', async () => {
+    it('exposes X-Fetched-At only when the request is cross-origin', async () => {
+        installUpstream();
         const env = mockEnv();
-        const liveAt = '2026-09-28T14:50:00.000Z';
-        const hubAt = '2026-09-28T14:40:00.000Z';
-        await cache.setEdge(TTL.livescore, [
-            { matchKey: '1', isLive: true, status: 'Live', player1Name: 'A', player2Name: 'B' },
-        ], 'livescore3', 'ATP', 'all', { fetchedAt: liveAt });
-        await cache.setEdge(TTL.hub, {
-            tournament: { key: '20340', name: 'Cached Open', tier: 'Grand Slam' },
-            featuredMatch: { matchKey: '9', status: 'Not Started', isLive: false },
-            todaysMatches: [],
-            recentResults: [],
-            h2h: null,
-        }, 'hub3', 'ATP', { fetchedAt: hubAt });
+        const res = await worker.fetch(get('/api/livescore?tour=ATP', 'http://localhost:3000'), env);
+        expect(res.headers.get('X-Fetched-At')).toBe(FIRST);
+        expect(res.headers.get('Access-Control-Expose-Headers')).toBe('X-Fetched-At');
+        expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:3000');
+    });
 
-        vi.setSystemTime(new Date(LATER));
+    it('does not put X-Fetched-At on the hub response', async () => {
         globalThis.fetch = vi.fn(() => { throw new Error('fetch must not be called'); });
-
-        const res = await worker.fetch(get('/api/hub?tour=ATP'), env);
-        const body = await res.json();
-        expect(res.status).toBe(200);
-        expect(body.fetchedAt).toBe(liveAt);
-        expect(body.data.fetchedAt).toBeUndefined();
-        expect(body.data.tournament.name).toBe('Cached Open');
-        expect(Object.keys(body).sort()).toEqual(['data', 'fetchedAt', 'ok']);
-        expect(JSON.stringify(body)).not.toMatch(/quota|ratelimit|hard stop/i);
-        expect(globalThis.fetch).not.toHaveBeenCalled();
+        const env = mockEnv();
+        const res = await worker.fetch(get('/api/hub?tour=ATP', 'http://localhost:3000'), env);
+        expect(res.headers.get('X-Fetched-At')).toBeNull();
+        expect(res.headers.get('Access-Control-Expose-Headers')).toBeNull();
     });
 });

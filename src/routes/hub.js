@@ -2,7 +2,6 @@ import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
 import { getCalendarYear } from '../calendarYear.js';
-import { stampFetchedAt } from '../fetchedAt.js';
 import { parseTour, rateLimit } from '../security.js';
 import {
     filterLiveEvents,
@@ -74,17 +73,12 @@ export async function handleHub(request, env) {
 
     const cacheKey = ['hub3', tour];
     const cached = await cache.get(env, ...cacheKey);
-    if (cached) return serveCachedHub(env, tour, cached.data, cached.fetchedAt);
+    if (cached) return overlayHubFromLivescoreCache(env, tour, cached.data);
 
     // 1. This year's calendar (and previous if we're in Jan), from the shared
     // 24h yearly cache. Filter to the active window in memory.
     const now  = new Date();
     const year = now.getFullYear();
-    // Worker clock at the first successful upstream response for this fill.
-    let fetchedAt = null;
-    const markFetched = () => {
-        if (!fetchedAt) fetchedAt = new Date().toISOString();
-    };
     let calendarItems = [];
     try {
         const years = now.getMonth() === 0 ? [year - 1, year] : [year];
@@ -95,7 +89,7 @@ export async function handleHub(request, env) {
         }
     } catch (err) {
         const stale = await cache.getStale(env, ...cacheKey);
-        if (stale) return serveCachedHub(env, tour, stale.data, stale.fetchedAt);
+        if (stale) return overlayHubFromLivescoreCache(env, tour, stale.data);
         throw err;
     }
 
@@ -125,10 +119,9 @@ export async function handleHub(request, env) {
             rapidAPI.tournamentResults(env, tour, tournamentId),
             rapidAPI.tournamentFixtures(env, tour, tournamentId),
         ]);
-        markFetched();
     } catch (err) {
         const stale = await cache.getStale(env, ...cacheKey);
-        if (stale) return serveCachedHub(env, tour, stale.data, stale.fetchedAt);
+        if (stale) return overlayHubFromLivescoreCache(env, tour, stale.data);
         throw err;
     }
 
@@ -220,7 +213,7 @@ export async function handleHub(request, env) {
             tournamentId,
             calendarItems,
             todayStr,
-        }, markFetched);
+        });
     } catch { /* fail-soft — hub still returns Core fixtures */ }
 
     let seen = [];
@@ -284,25 +277,9 @@ export async function handleHub(request, env) {
     // the livescore edge entry (no extra hub write) so first paint tracks
     // MatchStat InPlay.
     try {
-        const edgeArgs = fetchedAt ? [{ fetchedAt }] : [];
-        await cache.setEdge(TTL.hub, result, ...cacheKey, ...edgeArgs);
+        await cache.setEdge(TTL.hub, result, ...cacheKey);
     } catch { /* edge put is already fail-soft */ }
-    return stampFetchedAt(result, fetchedAt);
-}
-
-// Cache hit or stale/quota-stop fallback. The live section keeps the livescore
-// entry's original fetch time when those rows are overlaid; otherwise the
-// hub entry's own time. Never the time this request is served.
-async function serveCachedHub(env, tour, hubData, fetchedAt) {
-    let stamp = fetchedAt;
-    try {
-        const liveCached = await cache.get(env, 'livescore3', tour, 'all');
-        const rows = Array.isArray(liveCached?.data) ? liveCached.data : [];
-        const overlaid = rows.some(m => m && (m.isLive || m.status === 'Finished' || m.status === 'Delayed'));
-        if (overlaid && typeof liveCached?.fetchedAt === 'string') stamp = liveCached.fetchedAt;
-    } catch { /* overlay stays fail-soft */ }
-    const data = await overlayHubFromLivescoreCache(env, tour, hubData);
-    return stampFetchedAt(data, stamp);
+    return result;
 }
 
 async function overlayHubFromLivescoreCache(env, tour, hubData) {
@@ -318,11 +295,10 @@ async function overlayHubFromLivescoreCache(env, tour, hubData) {
     }
 }
 
-async function loadHubLiveRows(env, tour, { fixtures, results, tournamentId, calendarItems, todayStr }, markFetched) {
+async function loadHubLiveRows(env, tour, { fixtures, results, tournamentId, calendarItems, todayStr }) {
     let liveRaw = [];
     try {
         liveRaw = await rapidAPI.liveEvents(env);
-        if (env?.RAPIDAPI_KEY) markFetched?.();
     } catch {
         return [];
     }
