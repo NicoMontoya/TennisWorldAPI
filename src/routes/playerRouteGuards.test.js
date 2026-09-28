@@ -232,6 +232,98 @@ describe('player-stats and player-history guards', () => {
             expect(env.TENNIS_CACHE._puts).toHaveLength(0);
             expect(edgeSpy).toHaveBeenCalledTimes(1);
         });
+
+        it('caches a 4xx upstream error as a 600s edge miss and does not fetch again', async () => {
+            const calls = [];
+            globalThis.fetch = vi.fn(async () => {
+                calls.push(1);
+                return new Response(JSON.stringify({ error: true, message: 'no such player' }), { status: 404 });
+            });
+            edgeSpy.mockClear();
+            const playerKey = '1234567';
+            const first = await worker.fetch(get(`${path}?tour=ATP&playerKey=${playerKey}`), env);
+            expect(first.status).toBe(200);
+            const body = await first.json();
+            expect(body).toEqual({ ok: true, data: emptyData(path) });
+            expect(JSON.stringify(body)).not.toContain('no such player');
+            expect(calls).toHaveLength(1);
+            expect(env.TENNIS_CACHE._puts).toHaveLength(0);
+            expect(edgeSpy).toHaveBeenCalledTimes(1);
+            expect(edgeSpy.mock.calls[0][0]).toBe(600);
+            expect(edgeSpy.mock.calls[0][1]).toEqual({ miss: true });
+            expect(edgeSpy.mock.calls[0].slice(2)).toEqual([miss, 'ATP', playerKey]);
+
+            calls.length = 0;
+            const second = await worker.fetch(get(`${path}?tour=ATP&playerKey=${playerKey}`), env);
+            expect(second.status).toBe(200);
+            expect((await second.json()).data).toEqual(emptyData(path));
+            expect(calls).toEqual([]);
+            expect(env.TENNIS_CACHE._puts).toHaveLength(0);
+            expect(edgeSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it('caches a 5xx upstream error as a 120s edge miss and does not write KV', async () => {
+            const calls = [];
+            globalThis.fetch = vi.fn(async () => {
+                calls.push(1);
+                return new Response('unavailable', { status: 503 });
+            });
+            edgeSpy.mockClear();
+            const playerKey = '1234568';
+            const res = await worker.fetch(get(`${path}?tour=ATP&playerKey=${playerKey}`), env);
+            expect(res.status).toBe(200);
+            expect((await res.json()).data).toEqual(emptyData(path));
+            expect(calls).toHaveLength(1);
+            expect(env.TENNIS_CACHE._puts).toHaveLength(0);
+            expect(edgeSpy).toHaveBeenCalledTimes(1);
+            expect(edgeSpy.mock.calls[0][0]).toBe(120);
+            expect(edgeSpy.mock.calls[0].slice(2)).toEqual([miss, 'ATP', playerKey]);
+        });
+
+        it('caches a 429 upstream error as a 120s edge miss and does not write KV', async () => {
+            const calls = [];
+            globalThis.fetch = vi.fn(async () => {
+                calls.push(1);
+                return new Response('slow down', { status: 429 });
+            });
+            edgeSpy.mockClear();
+            const playerKey = '1234569';
+            const res = await worker.fetch(get(`${path}?tour=ATP&playerKey=${playerKey}`), env);
+            expect(res.status).toBe(200);
+            expect((await res.json()).data).toEqual(emptyData(path));
+            expect(calls.length).toBeGreaterThan(1);
+            expect(env.TENNIS_CACHE._puts).toHaveLength(0);
+            expect(edgeSpy).toHaveBeenCalledTimes(1);
+            expect(edgeSpy.mock.calls[0][0]).toBe(120);
+            expect(edgeSpy.mock.calls[0].slice(2)).toEqual([miss, 'ATP', playerKey]);
+        }, 15000);
+
+        it('caches an upstream error body as a 600s edge miss and does not write KV', async () => {
+            globalThis.fetch = vi.fn(async () => new Response(
+                JSON.stringify({ error: 'not found', message: 'hidden detail' }),
+                { status: 200 },
+            ));
+            edgeSpy.mockClear();
+            const res = await worker.fetch(get(`${path}?tour=ATP&playerKey=1234571`), env);
+            expect(res.status).toBe(200);
+            const body = await res.json();
+            expect(body.data).toEqual(emptyData(path));
+            expect(JSON.stringify(body)).not.toContain('hidden detail');
+            expect(env.TENNIS_CACHE._puts).toHaveLength(0);
+            expect(edgeSpy).toHaveBeenCalledTimes(1);
+            expect(edgeSpy.mock.calls[0][0]).toBe(600);
+        });
+
+        it('caches a timeout with no status as a 120s edge miss and does not write KV', async () => {
+            globalThis.fetch = vi.fn(async () => { throw new Error('The operation was aborted'); });
+            edgeSpy.mockClear();
+            const res = await worker.fetch(get(`${path}?tour=ATP&playerKey=1234570`), env);
+            expect(res.status).toBe(200);
+            expect((await res.json()).data).toEqual(emptyData(path));
+            expect(env.TENNIS_CACHE._puts).toHaveLength(0);
+            expect(edgeSpy).toHaveBeenCalledTimes(1);
+            expect(edgeSpy.mock.calls[0][0]).toBe(120);
+        });
     });
 
     it('caches a real player with matches, including titles = 0', async () => {

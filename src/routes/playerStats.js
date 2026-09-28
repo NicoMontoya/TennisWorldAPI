@@ -14,7 +14,9 @@ import { parseTour, rateLimit } from '../security.js';
 //   past-matches   → 6h   (updates after each match; never an empty list)
 //   tournament-map → 24h  (shared cache key with h2h.js)
 //   profile        → 30d  (birthday never changes)
-// A lookup with no past matches is an edge-only miss (10 min, no KV write).
+// A lookup with no past matches, or a thrown upstream error, is an edge-only
+// miss (no KV write): 10 min for an empty list, a 4xx, or an error body; 2 min
+// for a 5xx, 429, timeout, or unknown status.
 // Tour and playerKey are checked before any cache read or upstream call.
 // playerKey is 1–10 digits. Rate limit bucket: player-stats (fail closed).
 
@@ -23,6 +25,7 @@ const TTL_MATCHES  =  6 * 60 * 60;
 const TTL_CALENDAR = 24 * 60 * 60;
 const TTL_PROFILE  = 30 * 24 * 60 * 60;
 const TTL_MISS     = 10 * 60;
+const TTL_UPSTREAM_MISS = 2 * 60;
 
 const MAIN_TOUR_RANK_ID = 2;
 const PLAYER_KEY_RE = /^\d{1,10}$/;
@@ -36,6 +39,16 @@ function parsePlayerKey(raw) {
     const playerKey = String(raw).trim();
     if (!PLAYER_KEY_RE.test(playerKey)) httpError(400, 'Invalid playerKey.');
     return playerKey;
+}
+
+// 4xx (not 429) and an error body (2xx) stay for 10 minutes. 5xx, 429, a timeout,
+// and any status we cannot read are 2 minutes so a blip can recover.
+function upstreamMissTtl(err) {
+    const status = Number(err?.status);
+    if (!Number.isInteger(status)) return TTL_UPSTREAM_MISS;
+    if (status === 429 || status >= 500) return TTL_UPSTREAM_MISS;
+    if ((status >= 400 && status < 500) || (status >= 200 && status < 300)) return TTL_MISS;
+    return TTL_UPSTREAM_MISS;
 }
 
 function emptyStats() {
@@ -123,6 +136,8 @@ export async function handlePlayerStats(request, env) {
             }
         } catch (e) {
             console.error(`[player-stats] past-matches failed for ${tour}/${playerKey}:`, e.message);
+            await cache.setEdge(upstreamMissTtl(e), { miss: true }, 'player-stats-miss', tour, playerKey);
+            return emptyStats();
         }
     }
 
