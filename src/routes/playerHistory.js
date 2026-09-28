@@ -53,6 +53,10 @@ async function getTournamentMap(env, tour) {
         }
     }
 
+    // A hard stop (or a total upstream failure) must not pin an empty map
+    // for 24h. The shared key is also used by player stats and H2H.
+    if (!results.some(r => r.status === 'fulfilled')) return {};
+
     await cache.set(env, TTL_CALENDAR, map, ...ckey);
     return map;
 }

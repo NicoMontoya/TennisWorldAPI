@@ -21,6 +21,7 @@
 
 import { getMock } from './mocks/index.js';
 import { unwrapLiveEvents } from './transforms/matchstatLive.js';
+import { isHardStopActive, isQuotaStop, noteRapidQuota, QuotaStopError } from './quotaStop.js';
 
 const BASE         = 'https://api.api-tennis.com/tennis/';
 const MAX_RETRIES  = 3;
@@ -139,6 +140,12 @@ const RAPID_BASE = 'https://tennis-api-atp-wta-itf.p.rapidapi.com/tennis/v2';
 const RAPID_HOST = 'tennis-api-atp-wta-itf.p.rapidapi.com';
 
 async function rapidFetch(env, path, attempt = 1) {
+    // Every RapidAPI caller comes through here. A hard stop throws before fetch.
+    if (await isHardStopActive(env)) {
+        console.warn('[quota] hard stop active');
+        throw new QuotaStopError();
+    }
+
     const url = `${RAPID_BASE}${path}`;
     const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout
         ? AbortSignal.timeout(10_000)
@@ -156,11 +163,14 @@ async function rapidFetch(env, path, attempt = 1) {
     } catch {
         throw new Error('Upstream request failed');
     }
+    try {
+        await noteRapidQuota(env, res);
+    } catch { /* quota bookkeeping must not change the response */ }
     if (res.status === 429 && attempt <= 3) {
         await sleep(BASE_DELAY * 2 ** attempt);
         return rapidFetch(env, path, attempt + 1);
     }
-    // Generic errors only — never path, json.message, or the secret.
+    // Generic errors only — never path, json.message, the secret, or quota.
     if (!res.ok) throw new Error('Upstream request failed');
     const json = await res.json();
     if (json.error) throw new Error('Upstream request failed');
@@ -223,7 +233,12 @@ export const rapidAPI = {
             let json;
             try {
                 json = await rapidFetch(env, `/${tour.toLowerCase()}/ranking/singles?pageSize=${pageSize}&pageNo=${pageNo}`);
-            } catch { break; }
+            } catch (err) {
+                // A hard stop must not look like an empty ranking page. Callers
+                // then serve the stale standings copy instead of caching [].
+                if (isQuotaStop(err)) throw err;
+                break;
+            }
             const items = json?.data || [];
             if (!items.length) break;
             const before = byPos.size;
