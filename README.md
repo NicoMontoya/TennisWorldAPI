@@ -12,7 +12,7 @@ One Cloudflare Worker (`tennisworld-api`) serves everything:
 
 - `/*` — static frontend from the sibling `../TennisWorldUI` directory (assets binding)
 - `/api/*` — JSON API (this repo, `src/`)
-- KV (`TENNIS_CACHE`) — durable cache (rankings, vintage, match logs, auth, sessions, favorites). Hub payloads are not stored here. Livescore does not write its primary key; a successful fill writes one no-expiry stale copy.
+- KV (`TENNIS_CACHE`) — durable cache (rankings, vintage, match logs, auth, sessions, favorites). Not used for hub/livescore payloads.
 - Cache API (`caches.default`) — hub/livescore public payloads + per-IP rate-limit counters (not KV)
 - Cron (every 6h) — warms standings + calendar caches, seeds rank snapshots
 - Upstreams: MatchStat / RapidAPI `tennis-api-atp-wta-itf` (live scores via Extend `/extend/api/events/live`, plus Core fixtures/rankings/draws). api-tennis.com remains for a few legacy routes (tournaments, surface standings) — not Scores live.
@@ -104,16 +104,15 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
 ## Free-tier quota watch items
 
 - **KV writes: 1,000/day.** Durable cache fills (rankings, vintage, match logs),
-  prediction cache, and account writes count. Hub payloads and rate-limit ticks
-  use the Cache API, not KV. A live Scores tab polling `/api/livescore` every
-  15s hits the edge cache. A successful refill (about once a minute while the
-  board is live) writes one no-expiry KV stale copy
-  (`tw:livescore3:{tour}:{key}:stale`) — one put per fill, not per poll. The
-  primary livescore key is not written. Sticky-completion `:done` snapshots
-  still write KV only when the completed-match set changes. If a cache `put`
-  fails (quota / transient / Cache API), hub and livescore still return the
-  freshly computed payload instead of 500ing. Auth register/login still use a
-  KV counter (low volume). A model
+  prediction cache, and account writes count. Hub/livescore payloads and
+  rate-limit ticks use the Cache API, not KV — a live Scores tab polling
+  `/api/livescore` every 15s does not spend the daily quota on match JSON,
+  the fetch timestamp, or counters. The livescore fetch time stays on the
+  edge entry and in isolate memory. Sticky-completion `:done` snapshots still
+  write KV only when the completed-match set changes. If a cache `put` fails
+  (quota / transient / Cache API), hub and livescore still return the freshly
+  computed payload instead of 500ing. Auth register/login still use a KV
+  counter (low volume). A model
   auto-fill of a 128-draw caches ~127 predictions (shared across users — keys
   are per player-pair+surface). If traffic grows, the $5/mo Workers Paid plan
   raises this to 1M/day.
@@ -136,12 +135,13 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
   cached return their usual empty body or a generic upstream 503. Responses
   never include the remaining count, the reset, or whether the stop is on.
   `GET /api/livescore` always sends `X-Fetched-At`, an ISO 8601 UTC string.
-  A successful fill stores that Worker-clock time with the edge entry and a
-  KV stale copy. Cache hits, the stale copy, a hard stop, and an upstream
-  error all return that original time. If no board was ever fetched, the
-  header is `1970-01-01T00:00:00.000Z` (the UI treats it as stale). The JSON
-  body is unchanged (`data` stays the match array). The Scores page polls
-  this route, not `/api/hub`, so the hub response does not carry the header.
+  A successful fill stores that Worker-clock time on the edge entry next to
+  the payload, and in this isolate's memory. It is not written to KV. Cache
+  hits, a hard stop, and an upstream error return that original time while
+  the edge entry or this isolate still has it. If neither does, the header
+  is `1970-01-01T00:00:00.000Z` (the UI treats it as stale). The JSON body is
+  unchanged (`data` stays the match array). The Scores page polls this
+  route, not `/api/hub`, so the hub response does not carry the header.
   A cross-origin livescore response also lists that name in
   `Access-Control-Expose-Headers`.
 

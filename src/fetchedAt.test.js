@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import worker from './index.js';
 import { LIVESCORE_FETCHED_AT_UNKNOWN } from './fetchedAt.js';
+import { resetLivescoreFetchMemoryForTests } from './routes/livescore.js';
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const FIRST = '2026-09-28T15:00:00.000Z';
@@ -143,6 +144,7 @@ function assertFetchedAt(res, expected) {
 describe('X-Fetched-At', () => {
     beforeEach(() => {
         installMockCaches();
+        resetLivescoreFetchMemoryForTests();
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(FIRST));
     });
@@ -181,57 +183,96 @@ describe('X-Fetched-At', () => {
         expect(calls).toHaveLength(fetchesAfterFill);
     });
 
-    it('stale KV backup returns the original X-Fetched-At', async () => {
+    it('does not KV put on the livescore fetch path', async () => {
+        installUpstream();
+        const env = mockEnv();
+        const puts = [];
+        env.TENNIS_CACHE.put = async (key, value) => {
+            puts.push(String(key));
+            env.TENNIS_CACHE._store.set(key, value);
+        };
+        // Yearly calendar is already stored, so this request must not put.
+        await env.TENNIS_CACHE.put('tw:calendar-year:ATP:2026', JSON.stringify({
+            data: { data: [{ id: 20340, name: 'US Open', tier: 'Grand Slam', date: '2026-09-28' }] },
+            cachedAt: FIRST,
+            stale: false,
+        }));
+        puts.length = 0;
+
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const body = await res.json();
+        expect(res.status).toBe(200);
+        assertFetchedAt(res, FIRST);
+        expect(Array.isArray(body.data)).toBe(true);
+        expect(puts).toEqual([]);
+        expect([...env.TENNIS_CACHE._store.keys()].filter(k => String(k).includes('livescore'))).toEqual([]);
+    });
+
+    it('ignores a KV stale copy and does not put while resolving the fetch time', async () => {
         const calls = installUpstreamError();
         const env = mockEnv();
+        const puts = [];
+        const origPut = env.TENNIS_CACHE.put.bind(env.TENNIS_CACHE);
+        env.TENNIS_CACHE.put = async (key, value) => {
+            puts.push(String(key));
+            return origPut(key, value);
+        };
         await seedStale(env);
+        puts.length = 0;
         vi.setSystemTime(new Date(LATER));
 
         const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
         const body = await res.json();
         expect(res.status).toBe(200);
-        assertFetchedAt(res, ORIGINAL);
-        expect(body.data).toEqual(BOARD);
+        assertFetchedAt(res, LIVESCORE_FETCHED_AT_UNKNOWN);
+        expect(body.data).toEqual([]);
+        expect(puts).toEqual([]);
         expect(calls.length).toBeGreaterThan(0);
     });
 
-    it('hard-stop fallback returns the original X-Fetched-At and does not fetch', async () => {
-        globalThis.fetch = vi.fn(() => { throw new Error('fetch must not be called'); });
+    it('hard-stop fallback returns the original X-Fetched-At from the edge entry and does not fetch', async () => {
+        installUpstream();
         const env = mockEnv();
+        const filled = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const filledBody = await filled.json();
+        assertFetchedAt(filled, FIRST);
+
         env.RAPIDAPI_HARD_STOP = 'force';
-        await seedStale(env);
-        vi.setSystemTime(new Date(LATER));
-
-        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
-        const body = await res.json();
-        expect(res.status).toBe(200);
-        assertFetchedAt(res, ORIGINAL);
-        expect(body.data).toEqual(BOARD);
-        expect(globalThis.fetch).not.toHaveBeenCalled();
-    });
-
-    it('upstream error fallback returns the original X-Fetched-At', async () => {
-        const calls = installUpstreamError();
-        const env = mockEnv();
-        await seedStale(env, FIRST);
+        globalThis.fetch = vi.fn(() => { throw new Error('fetch must not be called'); });
         vi.setSystemTime(new Date(LATER));
 
         const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
         const body = await res.json();
         expect(res.status).toBe(200);
         assertFetchedAt(res, FIRST);
-        expect(body.data).toEqual(BOARD);
-        expect(calls.length).toBeGreaterThan(0);
+        expect(body.data).toEqual(filledBody.data);
+        expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
-    it('uses the last successful fetch time when the board cache is gone', async () => {
+    it('upstream error fallback returns the original X-Fetched-At from isolate memory', async () => {
         installUpstream();
         const env = mockEnv();
         const filled = await worker.fetch(get('/api/livescore?tour=ATP'), env);
         assertFetchedAt(filled, FIRST);
 
         globalThis.caches.default._store.delete(EDGE_BOARD);
-        await env.TENNIS_CACHE.delete('tw:livescore3:ATP:all:stale');
+        installUpstreamError();
+        vi.setSystemTime(new Date(LATER));
+
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const body = await res.json();
+        expect(res.status).toBe(200);
+        assertFetchedAt(res, FIRST);
+        expect(body.data).toEqual([]);
+    });
+
+    it('uses the last successful fetch time from isolate memory when the board cache is gone', async () => {
+        installUpstream();
+        const env = mockEnv();
+        const filled = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        assertFetchedAt(filled, FIRST);
+
+        globalThis.caches.default._store.delete(EDGE_BOARD);
         env.RAPIDAPI_HARD_STOP = 'force';
         globalThis.fetch = vi.fn(() => { throw new Error('fetch must not be called'); });
         vi.setSystemTime(new Date(LATER));

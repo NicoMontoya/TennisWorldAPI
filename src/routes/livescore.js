@@ -135,10 +135,30 @@ async function loadCalendar(env, tour, now) {
 // Response is the existing fixtures-board shape (string[] setScores) plus
 // currentGame when InPlay. 60s TTL when InPlay, scheduled, or delayed;
 // idle 2 min only when the board is finished-only / empty.
-// The live payload is edge-cached. A successful fill also writes one
-// no-expiry KV stale copy so an outage or hard stop can serve that board.
-// The primary KV key is not written. Sticky-completion `:done` still uses
-// KV when the completed-match set changes.
+// The live payload is edge-cached. The upstream fetch time is stored on that
+// edge entry and in this isolate's memory. It is never written to KV.
+// Sticky-completion `:done` still uses KV when the completed-match set changes.
+const lastFetchAt = new Map();
+
+function fetchMemoryKey(cacheKey) {
+    return cacheKey.map(String).join(':');
+}
+
+function rememberFetchedAt(cacheKey, fetchedAt) {
+    const at = normalizeFetchedAt(fetchedAt);
+    // The epoch means "unknown", not a successful upstream fetch.
+    if (at === LIVESCORE_FETCHED_AT_UNKNOWN) return;
+    lastFetchAt.set(fetchMemoryKey(cacheKey), at);
+}
+
+function recallFetchedAt(cacheKey) {
+    return lastFetchAt.get(fetchMemoryKey(cacheKey)) || null;
+}
+
+export function resetLivescoreFetchMemoryForTests() {
+    lastFetchAt.clear();
+}
+
 export async function handleLivescore(request, env) {
     await rateLimit(env, request, 'livescore');
 
@@ -154,6 +174,9 @@ export async function handleLivescore(request, env) {
         // upstream time. cachedAt is only a stand-in for entries written
         // before fetchedAt was stored.
         const at = normalizeFetchedAt(cached.fetchedAt || cached.cachedAt);
+        // This isolate can still answer after the edge entry expires, without
+        // a KV write. The time came from the edge payload.
+        rememberFetchedAt(cacheKey, at);
         return stampFetchedAt(cached.data, at);
     }
 
@@ -271,52 +294,30 @@ export async function handleLivescore(request, env) {
     await persistSeenLive(env, tour, seenKey, snapshot, prevSeen);
     data = data.map(stripStickyFlag);
 
-    // A successful upstream fill remembers its clock time on the edge entry,
-    // a no-expiry KV stale copy, and a long-lived edge marker. Failures do
-    // not invent a new time.
+    // A successful upstream fill remembers its clock time on the edge entry
+    // (with the payload) and in this isolate. Failures do not invent a time
+    // and do not write KV.
     if (fetchedAt) {
+        rememberFetchedAt(cacheKey, fetchedAt);
         try {
             await cache.setEdge(livescoreTtlFor(data), data, ...cacheKey, { fetchedAt });
         } catch { /* edge put is already fail-soft */ }
-        try {
-            await cache.setStale(env, data, ...cacheKey, { fetchedAt });
-        } catch { /* KV stale is best-effort */ }
-        try {
-            await cache.setEdge(LIVESCORE_FETCHED_AT_MARKER_TTL, fetchedAt, ...cacheKey, 'fetched-at');
-        } catch { /* marker is best-effort */ }
         return stampFetchedAt(data, fetchedAt);
     }
 
-    return serveLivescoreFallback(env, cacheKey);
+    return serveLivescoreFallback(cacheKey);
 }
 
-// No successful upstream response this request. Serve the KV stale board
-// when we have one; otherwise the empty board with the last known fetch
-// time, or the epoch when nothing was ever fetched.
-async function serveLivescoreFallback(env, cacheKey) {
-    const stale = await cache.getStale(env, ...cacheKey);
-    if (stale && Array.isArray(stale.data)) {
-        const at = normalizeFetchedAt(stale.fetchedAt || stale.cachedAt);
-        try {
-            await cache.setEdge(livescoreTtlFor(stale.data), stale.data, ...cacheKey, { fetchedAt: at });
-        } catch { /* next miss can read KV again */ }
-        return stampFetchedAt(stale.data, at);
-    }
-
-    let known = null;
-    try {
-        const marker = await cache.getEdge(...cacheKey, 'fetched-at');
-        if (typeof marker?.data === 'string') known = marker.data;
-    } catch { /* treat as unknown */ }
-    const at = normalizeFetchedAt(known || LIVESCORE_FETCHED_AT_UNKNOWN);
+// No successful upstream response and no edge payload. The last fetch time
+// is this isolate's memory, or the epoch when this isolate never saw one.
+async function serveLivescoreFallback(cacheKey) {
+    const at = normalizeFetchedAt(recallFetchedAt(cacheKey) || LIVESCORE_FETCHED_AT_UNKNOWN);
     const empty = [];
     try {
         await cache.setEdge(TTL.livescoreIdle, empty, ...cacheKey, { fetchedAt: at });
     } catch { /* header is still set on this response */ }
     return stampFetchedAt(empty, at);
 }
-
-const LIVESCORE_FETCHED_AT_MARKER_TTL = 31 * 24 * 60 * 60;
 
 /** 60s while anything is live, scheduled, or delayed; 120s only when nothing can go InPlay. */
 export function livescoreTtlFor(board) {
