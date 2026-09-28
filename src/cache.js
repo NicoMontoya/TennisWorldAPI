@@ -88,9 +88,21 @@ export const cache = {
      * Free-tier KV writes.
      */
     async setEdge(ttlSeconds, value, ...keyParts) {
+        let fetchedAt;
+        if (keyParts.length) {
+            const last = keyParts[keyParts.length - 1];
+            if (last && typeof last === 'object' && !Array.isArray(last) && 'fetchedAt' in last) {
+                fetchedAt = last.fetchedAt;
+                keyParts = keyParts.slice(0, -1);
+            }
+        }
         const key = buildKey(...keyParts);
         const cachedAt = new Date().toISOString();
-        await edgePut(key, { data: value, cachedAt, stale: false }, ttlSeconds);
+        const envelope = { data: value, cachedAt, stale: false };
+        // Original upstream fetch time. Cache hits read this back; it is not
+        // the time the entry is served.
+        if (typeof fetchedAt === 'string' && fetchedAt) envelope.fetchedAt = fetchedAt;
+        await edgePut(key, envelope, ttlSeconds);
     },
 
     /**
