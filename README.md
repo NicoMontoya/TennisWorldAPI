@@ -121,20 +121,22 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
   Worker secret (60s edge TTL while anything is live, scheduled, or delayed).
   Leftover api-tennis.com routes still use `TENNIS_API_KEY`.
 - **`RAPIDAPI_HARD_STOP`** (`wrangler.toml` `[vars]`, ships as `off`). `on` stops
-  new RapidAPI calls after a response shows the monthly quota is exhausted
-  (`x-ratelimit-requests-remaining` missing, non-numeric, zero, or negative).
-  `off` never stops. `force` stops immediately. Unset is `off`. Only the exact
-  strings `off`, `on`, and `force` are recognized; any other present value
-  (blank, different case, trailing space, typo) acts as `on`. There is no
-  route to change it. The shared flag is one KV write (`{until}`), read back
-  through a 60s edge cache. A missing remaining-header on 3 consecutive
-  responses in one location also stops that location locally (edge only, no
-  extra KV write). Reset seconds clamp to 60s–31 days; a missing reset rechecks
-  in 24h. With the stop on, visitors get cached or stale rankings, draws, and
+  new RapidAPI calls after a 2xx response shows the monthly quota is exhausted
+  (`x-ratelimit-requests-remaining` present but non-numeric, zero, or negative).
+  A 2xx with that header missing only counts toward a per-location streak and
+  trips the shared flag when the streak reaches 3. Non-2xx responses are
+  ignored, except 429, which trips immediately. `off` never stops. `force`
+  stops immediately. Unset is `off`. Only the exact strings `off`, `on`, and
+  `force` are recognized; any other present value (blank, different case,
+  trailing space, typo) acts as `on`. There is no route to change it. The
+  shared flag is one KV write (`{until}`), read back through a 60s edge cache.
+  The miss streak also stops that location locally at 3 (edge only). Reset
+  seconds clamp to 60s–31 days; a missing reset rechecks in 24h. With the stop on, visitors get cached or stale rankings, draws, and
   results; live scores stay frozen on the last edge payload; pages with nothing
   cached return their usual empty body or a generic upstream 503. Responses
   never include the remaining count, the reset, or whether the stop is on.
   `GET /api/livescore` always sends `X-Fetched-At`, an ISO 8601 UTC string.
+  Other methods (HEAD, POST) are not this route and do not send the header.
   A successful fill stores that Worker-clock time on the edge entry next to
   the payload, and in this isolate's memory. It is not written to KV. Cache
   hits, a hard stop, and an upstream error return that original time while

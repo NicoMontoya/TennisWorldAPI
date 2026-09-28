@@ -155,6 +155,17 @@ function recallFetchedAt(cacheKey) {
     return lastFetchAt.get(fetchMemoryKey(cacheKey)) || null;
 }
 
+// Last successful upstream time for this isolate, or null. Used when a
+// livescore request throws after a previous fill, so the error response
+// still carries that time instead of the epoch.
+export function recallLivescoreFetchedAt(tour, tournamentKey) {
+    const normalizedTour = String(tour || 'ATP').trim().toUpperCase() || 'ATP';
+    const tk = tournamentKey == null || String(tournamentKey).trim() === ''
+        ? 'all'
+        : String(tournamentKey).trim();
+    return recallFetchedAt(['livescore3', normalizedTour, tk]);
+}
+
 export function resetLivescoreFetchMemoryForTests() {
     lastFetchAt.clear();
 }
@@ -168,7 +179,14 @@ export async function handleLivescore(request, env) {
 
     const cacheKey = ['livescore3', tour, tournamentKey || 'all'];
 
-    const cached = await cache.get(env, ...cacheKey);
+    let cached = null;
+    try {
+        cached = await cache.get(env, ...cacheKey);
+    } catch {
+        // A KV read error must not 500 the ticker. Serve the empty board
+        // with this isolate's last fetch time, or the epoch.
+        return serveLivescoreFallback(cacheKey);
+    }
     if (cached && Array.isArray(cached.data)) {
         // Edge hit (and a KV primary, if one exists) keeps the original
         // upstream time. cachedAt is only a stand-in for entries written
@@ -238,6 +256,11 @@ export async function handleLivescore(request, env) {
         fixturesByTid.set(tid, fx.status === 'fulfilled' ? (fx.value?.data || []) : []);
         resultsByTid.set(tid, rs.status === 'fulfilled' ? (rs.value?.data?.singles || []) : []);
     }));
+
+    // No successful upstream response. Skip seen/sticky: empty live rows
+    // would mark every previously in-play match Finished, write
+    // tw:livescore3:…:done, and overwrite the 12h seen snapshot.
+    if (!fetchedAt) return serveLivescoreFallback(cacheKey);
 
     const coreIndex = indexCoreMatches(fixturesByTid, resultsByTid);
     const liveRows = liveFiltered

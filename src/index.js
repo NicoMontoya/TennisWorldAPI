@@ -6,7 +6,7 @@
 
 import { handleStandings }        from './routes/standings.js';
 import { handlePlayerStats }      from './routes/playerStats.js';
-import { handleLivescore }        from './routes/livescore.js';
+import { handleLivescore, recallLivescoreFetchedAt } from './routes/livescore.js';
 import { handleFixtures }         from './routes/fixtures.js';
 import { handlePlayer }           from './routes/players.js';
 import { handleH2H }              from './routes/h2h.js';
@@ -193,11 +193,27 @@ export default {
             // QuotaStopError's message is already generic. Force it anyway so a
             // remaining count or stop flag can never reach the client.
             const message = isQuotaStop(err) ? 'Upstream request failed' : err.message;
-            const extra = livescoreFetchedAtHeaders(pathname, request, LIVESCORE_FETCHED_AT_UNKNOWN);
+            const extra = livescoreFetchedAtHeaders(
+                pathname,
+                request,
+                thrownLivescoreFetchedAt(request),
+            );
             return jsonResponse({ ok: false, error: message }, status, env, request, extra);
         }
     },
 };
+
+function thrownLivescoreFetchedAt(request) {
+    try {
+        const { searchParams } = new URL(request.url);
+        return recallLivescoreFetchedAt(
+            searchParams.get('tour'),
+            searchParams.get('tournamentKey'),
+        ) || LIVESCORE_FETCHED_AT_UNKNOWN;
+    } catch {
+        return LIVESCORE_FETCHED_AT_UNKNOWN;
+    }
+}
 
 function livescoreFetchedAtHeaders(pathname, request, fetchedAt) {
     if (pathname !== '/api/livescore') return undefined;

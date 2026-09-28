@@ -8,6 +8,7 @@ import { handleCalendar } from './routes/calendar.js';
 import { handleDraws } from './routes/draws.js';
 import { handlePlayerStats } from './routes/playerStats.js';
 import { handleScheduled, RANK_SEED_UTC_HOUR } from './index.js';
+import { handleStandings } from './routes/standings.js';
 import { seedRankSnapshots } from './routes/playerRankHistory.js';
 import worker from './index.js';
 
@@ -183,6 +184,36 @@ describe('yearly calendar cache', () => {
         await calendarYearFor(env, 'ATP', old);
         expect(calendar).toHaveBeenCalledTimes(1);
         expect([...env.store.keys()].some(k => k.includes(String(old)))).toBe(false);
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('does not pin an empty calendar year in KV', async () => {
+        const year = new Date().getFullYear();
+        calendar.mockResolvedValue({ data: [] });
+        const edgeSpy = vi.spyOn(cache, 'setEdge');
+
+        const first = await getCalendarYear(env, 'ATP', year);
+        expect(first).toEqual({ data: [] });
+        expect(yearCalls(year)).toHaveLength(1);
+        expect(env.puts).toEqual([]);
+        expect([...env.store.keys()].some(k => k.includes('calendar-year'))).toBe(false);
+        expect(edgeSpy).toHaveBeenCalledWith(
+            TTL.edgeMiss,
+            { data: [] },
+            'calendar-year',
+            'ATP',
+            String(year),
+        );
+
+        const second = await getCalendarYear(env, 'ATP', year);
+        expect(second).toEqual({ data: [] });
+        expect(yearCalls(year)).toHaveLength(1);
+
+        globalThis.caches.default._store.clear();
+        const third = await getCalendarYear(env, 'ATP', year);
+        expect(third).toEqual({ data: [] });
+        expect(yearCalls(year)).toHaveLength(2);
+        expect(env.puts).toEqual([]);
         expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
@@ -437,6 +468,43 @@ describe('cron rank snapshots', () => {
         expect(env.store.has('tw:rank-history:v1:ATP:999')).toBe(false);
         expect(globalThis.fetch).not.toHaveBeenCalled();
     });
+
+    it('reads rankingDate from the ranking row date field', async () => {
+        rankingsPaged.mockResolvedValue({
+            data: [{
+                position: 1,
+                point: 11330,
+                date: '2026-09-21T00:00:00.000Z',
+                player: {
+                    id: 47275,
+                    name: 'Jannik Sinner',
+                    countryAcr: 'ITA',
+                    country: { name: 'Italy', acronym: 'ITA' },
+                    birthday: '2001-08-16T00:00:00.000Z',
+                    progress: 0,
+                    currentRank: 1,
+                },
+            }, {
+                position: 2,
+                point: 9000,
+                date: '2026-09-14T00:00:00.000Z',
+                player: { id: 2315, name: 'Carlos Alcaraz', countryAcr: 'ESP' },
+            }],
+        });
+
+        const rows = await handleStandings(get('/api/standings?tour=ATP'), env);
+        expect(rows).toEqual([expect.objectContaining({
+            playerKey: '47275',
+            rank: 1,
+            name: 'Jannik Sinner',
+            points: 11330,
+            rankingDate: '2026-09-21',
+            country: 'Italy',
+        })]);
+        expect(rows.map(r => r.rankingDate)).toEqual(['2026-09-21']);
+        expect(rows[0].rankingDate).not.toBe(new Date().toISOString().slice(0, 10));
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
 });
 
 describe('draws ranks from cached standings', () => {
@@ -489,6 +557,23 @@ describe('draws ranks from cached standings', () => {
         rankingsPaged.mockClear();
 
         const data = await handleDraws(get('/api/draws?tournamentKey=9001&tour=ATP'), env);
+        expect(rankingsPaged).not.toHaveBeenCalled();
+        expect(matchRanks(data)).toEqual({ p1: 4, p2: 15 });
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('uses the standings stale copy instead of rankingsPaged when the primary has expired', async () => {
+        await env.TENNIS_CACHE.put('tw:standings2:ATP:stale', JSON.stringify({
+            data: [
+                { playerKey: '101', rank: 4 },
+                { playerKey: '202', rank: 15 },
+            ],
+            cachedAt: '2026-09-01T00:00:00.000Z',
+            stale: true,
+        }));
+        rankingsPaged.mockClear();
+
+        const data = await handleDraws(get('/api/draws?tournamentKey=9003&tour=ATP'), env);
         expect(rankingsPaged).not.toHaveBeenCalled();
         expect(matchRanks(data)).toEqual({ p1: 4, p2: 15 });
         expect(globalThis.fetch).not.toHaveBeenCalled();

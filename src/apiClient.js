@@ -225,7 +225,10 @@ export const rapidAPI = {
         return { data: all };
     },
 
-    // Singles rankings: { data: [{position, point, player: {id, name, currentRank, ...}}] }
+    // Singles rankings: { data: [{ position, point, date, player: { id, name, currentRank, ... } }] }
+    // `date` is the official ranking week (ISO timestamp). Standings copies it
+    // to rankingDate. rankingsPaged returns only { data }, so a top-level
+    // response date is not available as a fallback.
     // pageSize=100 for enrichment lookups; pass 2000 to get all ranked players (multi-week).
     rankings: (env, tour, pageSize = 100) =>
         rapidFetch(env, `/${tour.toLowerCase()}/ranking/singles?pageSize=${pageSize}`),

@@ -16,6 +16,7 @@ const BOARD = [{
     setScores: ['1-0'],
 }];
 const EDGE_BOARD = 'https://tennisworld-cache.internal/tw:livescore3:ATP:all';
+const EDGE_SEEN = 'https://tennisworld-cache.internal/tw:livescore3:ATP:all:seen';
 
 function urlOf(req) {
     return typeof req === 'string' ? req : req.url;
@@ -128,6 +129,20 @@ async function seedStale(env, fetchedAt = ORIGINAL) {
         cachedAt: fetchedAt,
         stale: true,
     }));
+}
+
+function seenSnapshot() {
+    return globalThis.caches.default._store.get(EDGE_SEEN)?.body ?? null;
+}
+
+function trackPuts(env) {
+    const puts = [];
+    const orig = env.TENNIS_CACHE.put.bind(env.TENNIS_CACHE);
+    env.TENNIS_CACHE.put = async (key, value, opts) => {
+        puts.push(String(key));
+        return orig(key, value, opts);
+    };
+    return puts;
 }
 
 function assertFetchedAt(res, expected) {
@@ -283,6 +298,97 @@ describe('X-Fetched-At', () => {
         assertFetchedAt(res, FIRST);
         expect(body.data).toEqual([]);
         expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('hard stop does not sticky-complete in-play matches or KV put', async () => {
+        installUpstream();
+        const env = mockEnv();
+        const puts = trackPuts(env);
+        const filled = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const filledBody = await filled.json();
+        expect(filledBody.data.some(m => m.isLive)).toBe(true);
+        const seenBefore = seenSnapshot();
+        expect(seenBefore).toBeTruthy();
+        expect(seenBefore).not.toMatch(/"stickyComplete":true/);
+        puts.length = 0;
+
+        globalThis.caches.default._store.delete(EDGE_BOARD);
+        env.RAPIDAPI_HARD_STOP = 'force';
+        globalThis.fetch = vi.fn(() => { throw new Error('fetch must not be called'); });
+        vi.setSystemTime(new Date(LATER));
+
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const body = await res.json();
+        expect(res.status).toBe(200);
+        expect(body.data).toEqual([]);
+        expect(puts).toEqual([]);
+        expect(env.TENNIS_CACHE._store.has('tw:livescore3:ATP:all:done')).toBe(false);
+        expect(seenSnapshot()).toBe(seenBefore);
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('upstream error does not sticky-complete in-play matches or KV put', async () => {
+        installUpstream();
+        const env = mockEnv();
+        const puts = trackPuts(env);
+        const filled = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const filledBody = await filled.json();
+        expect(filledBody.data.some(m => m.isLive)).toBe(true);
+        const seenBefore = seenSnapshot();
+        expect(seenBefore).toBeTruthy();
+        puts.length = 0;
+
+        globalThis.caches.default._store.delete(EDGE_BOARD);
+        const calls = installUpstreamError();
+        vi.setSystemTime(new Date(LATER));
+
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const body = await res.json();
+        expect(res.status).toBe(200);
+        expect(body.data).toEqual([]);
+        expect(puts).toEqual([]);
+        expect(env.TENNIS_CACHE._store.has('tw:livescore3:ATP:all:done')).toBe(false);
+        expect(seenSnapshot()).toBe(seenBefore);
+        expect(calls.length).toBeGreaterThan(0);
+    });
+
+    it('a KV read error falls back instead of returning 500', async () => {
+        installUpstream();
+        const env = mockEnv();
+        const filled = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        assertFetchedAt(filled, FIRST);
+
+        globalThis.caches.default._store.delete(EDGE_BOARD);
+        env.TENNIS_CACHE.get = async () => { throw new Error('kv read failed'); };
+        vi.setSystemTime(new Date(LATER));
+
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const body = await res.json();
+        expect(res.status).toBe(200);
+        assertFetchedAt(res, FIRST);
+        expect(body.data).toEqual([]);
+        expect(body.ok).toBe(true);
+    });
+
+    it('a thrown livescore error keeps the isolate fetch time', async () => {
+        installUpstream();
+        const env = mockEnv();
+        const filled = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        assertFetchedAt(filled, FIRST);
+
+        vi.setSystemTime(new Date(LATER));
+        globalThis.caches.default._store.set(
+            'https://rl.internal/livescore/203.0.113.77',
+            {
+                body: JSON.stringify({ count: 60, windowStart: Date.now() }),
+                headers: { 'content-type': 'application/json' },
+            },
+        );
+
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        expect(res.status).toBe(429);
+        assertFetchedAt(res, FIRST);
+        expect(await res.json()).toEqual({ ok: false, error: 'Too many requests. Please try again shortly.' });
     });
 
     it('uses the epoch when no fetch time is known and the board is empty', async () => {

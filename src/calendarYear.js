@@ -1,5 +1,6 @@
 import { cache } from './cache.js';
 import { rapidAPI } from './apiClient.js';
+import { TTL } from './config.js';
 import { parseTour } from './security.js';
 
 // Full-year tournament calendar, shared by livescore, hub, /api/calendar,
@@ -35,7 +36,14 @@ export async function getCalendarYear(env, tourRaw, yearRaw, now = new Date()) {
 
     try {
         const cal = await rapidAPI.calendar(env, tour, year);
-        const payload = { data: cal?.data || (Array.isArray(cal) ? cal : []) };
+        const rows = Array.isArray(cal?.data) ? cal.data : (Array.isArray(cal) ? cal : []);
+        const payload = { data: rows };
+        // An empty upstream page must not pin a blank year for 24h. A short
+        // edge miss lets the next fill try again without a KV write.
+        if (!rows.length) {
+            await cache.setEdge(TTL.edgeMiss, payload, KEY, tour, year);
+            return payload;
+        }
         await cache.set(env, CALENDAR_YEAR_TTL, payload, KEY, tour, year);
         return payload;
     } catch (err) {
