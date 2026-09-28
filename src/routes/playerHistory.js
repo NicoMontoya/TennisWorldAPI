@@ -1,5 +1,6 @@
-import { cache }    from '../cache.js';
+import { cache } from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
+import { parseTour, rateLimit } from '../security.js';
 
 // GET /api/player-history?tour=ATP|WTA&playerKey=47275
 //
@@ -9,11 +10,28 @@ import { rapidAPI } from '../apiClient.js';
 // Season shape:
 //   { year, wins, losses, winPct, titles, hard:{wins,losses}, clay:{wins,losses}, grass:{wins,losses} }
 //
-// Caching: 12h — changes only after a match is played.
+// Caching: 12h — changes only after a match is played. Empty seasons are not
+// written to KV. A lookup with no matches is an edge-only miss (10 min).
+// Tour and playerKey are checked before any cache read or upstream call.
+// playerKey is 1–10 digits. Rate limit bucket: player-history (fail closed).
 
 const TTL_HISTORY  = 12 * 60 * 60;
 const TTL_TITLES   = 72 * 60 * 60;
 const TTL_CALENDAR = 24 * 60 * 60;
+const TTL_MISS     = 10 * 60;
+
+const PLAYER_KEY_RE = /^\d{1,10}$/;
+
+function httpError(status, message) {
+    throw Object.assign(new Error(message), { status });
+}
+
+function parsePlayerKey(raw) {
+    if (raw == null || String(raw).trim() === '') httpError(400, 'playerKey is required');
+    const playerKey = String(raw).trim();
+    if (!PLAYER_KEY_RE.test(playerKey)) httpError(400, 'Invalid playerKey.');
+    return playerKey;
+}
 
 const MAIN_TOUR_RANK_ID = 2;
 
@@ -57,10 +75,14 @@ async function getTournamentMap(env, tour) {
 }
 
 export async function handlePlayerHistory(request, env) {
+    await rateLimit(env, request, 'player-history');
+
     const { searchParams } = new URL(request.url);
-    const tour      = (searchParams.get('tour') || 'ATP').toUpperCase();
-    const playerKey = searchParams.get('playerKey');
-    if (!playerKey) throw new Error('playerKey is required');
+    const tour      = parseTour(searchParams.get('tour'));
+    const playerKey = parsePlayerKey(searchParams.get('playerKey'));
+
+    const miss = await cache.getEdge('player-history-miss', tour, playerKey);
+    if (miss?.data?.miss === true) return { seasons: [], careerTitles: 0 };
 
     const cacheKey = ['player-history-v1', tour, playerKey];
     const cached   = await cache.get(env, ...cacheKey);
@@ -68,16 +90,32 @@ export async function handlePlayerHistory(request, env) {
 
     const pid = Number(playerKey);
 
-    // ── Fetch matches + tournament map in parallel ─────────────────────────────
-    const [matchesResult, tMapResult, titlesResult] = await Promise.allSettled([
-        rapidAPI.playerPastMatches(env, tour, playerKey, 500),
+    // Matches decide whether this key is a player. An empty list is not a KV
+    // write, and the shared tournament map is not fetched for that miss.
+    let matches = [];
+    let upstreamEmpty = false;
+    try {
+        const raw = await rapidAPI.playerPastMatches(env, tour, playerKey, 500);
+        matches = raw?.data || [];
+        if (!matches.length) upstreamEmpty = true;
+    } catch (e) {
+        console.error(`[player-history] past-matches failed for ${tour}/${playerKey}:`, e.message);
+    }
+
+    if (!matches.length) {
+        if (upstreamEmpty) {
+            await cache.setEdge(TTL_MISS, { miss: true }, 'player-history-miss', tour, playerKey);
+        }
+        return { seasons: [], careerTitles: 0 };
+    }
+
+    const [tMapResult, titlesResult] = await Promise.allSettled([
         getTournamentMap(env, tour),
         rapidAPI.playerTitles(env, tour, playerKey),
     ]);
 
-    const matches = matchesResult.status  === 'fulfilled' ? (matchesResult.value?.data  || []) : [];
-    const tMap    = tMapResult.status     === 'fulfilled' ?  tMapResult.value              : {};
-    const titlesRaw = titlesResult.status === 'fulfilled' ? (titlesResult.value?.data || []) : [];
+    const tMap      = tMapResult.status    === 'fulfilled' ?  tMapResult.value           : {};
+    const titlesRaw = titlesResult.status  === 'fulfilled' ? (titlesResult.value?.data || []) : [];
 
     // Career total titles (no per-year breakdown from this endpoint)
     const careerTitles = titlesRaw
