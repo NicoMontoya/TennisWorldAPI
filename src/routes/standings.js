@@ -1,6 +1,7 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
+import { officialRankingDate } from './playerRankHistory.js';
 
 // GET /api/standings?tour=ATP|WTA
 // Returns all players currently ranked (with ATP/WTA points), sorted by rank.
@@ -39,6 +40,7 @@ export async function handleStandings(request, env) {
                 country:   r.player?.country?.name     || r.player?.countryAcr || '',
                 birthday:  r.player?.birthday          || null,
                 points:    r.point                     || 0,
+                rankingDate: officialRankingDate(r.date),
                 tour,
             }))
             .sort((a, b) => a.rank - b.rank);

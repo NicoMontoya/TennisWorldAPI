@@ -107,8 +107,9 @@ function corsHeaders(env, request) {
 
 // ── Cron: background KV cache refresh ────────────────────────────────────────
 // Triggered every 6h by wrangler.toml [[triggers.crons]] (`0 */6 * * *`).
-// Standings stay warm on every run. Rank snapshots are one KV write per
-// player per day, so they run only when the scheduled UTC hour is 12.
+// Standings stay warm on every run. Rank snapshots run only when the
+// scheduled UTC hour is 12, and only for a feed ranking date that is not
+// already stored (no rewrite of the same week).
 // The calendar warm used to call /api/calendar with a date window nobody
 // else requests; it now fills getCalendarYear for the current year.
 export const RANK_SEED_UTC_HOUR = 12;
