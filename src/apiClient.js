@@ -138,6 +138,12 @@ async function call(env, method, params = {}, opts = {}) {
 const RAPID_BASE = 'https://tennis-api-atp-wta-itf.p.rapidapi.com/tennis/v2';
 const RAPID_HOST = 'tennis-api-atp-wta-itf.p.rapidapi.com';
 
+function upstreamFailed(status) {
+    const err = new Error('Upstream request failed');
+    if (Number.isInteger(status)) err.status = status;
+    return err;
+}
+
 async function rapidFetch(env, path, attempt = 1) {
     const url = `${RAPID_BASE}${path}`;
     const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout
@@ -154,16 +160,18 @@ async function rapidFetch(env, path, attempt = 1) {
             signal,
         });
     } catch {
-        throw new Error('Upstream request failed');
+        throw upstreamFailed();
     }
     if (res.status === 429 && attempt <= 3) {
         await sleep(BASE_DELAY * 2 ** attempt);
         return rapidFetch(env, path, attempt + 1);
     }
     // Generic errors only — never path, json.message, or the secret.
-    if (!res.ok) throw new Error('Upstream request failed');
+    // status is the HTTP status (omitted when fetch itself threw). A 2xx throw
+    // means the body set `error`.
+    if (!res.ok) throw upstreamFailed(res.status);
     const json = await res.json();
-    if (json.error) throw new Error('Upstream request failed');
+    if (json.error) throw upstreamFailed(res.status);
     return json;
 }
 

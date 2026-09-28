@@ -1,5 +1,6 @@
-import { cache }    from '../cache.js';
+import { cache } from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
+import { parseTour, rateLimit } from '../security.js';
 
 // GET /api/player-stats?tour=ATP|WTA&playerKey=47275
 //
@@ -8,18 +9,63 @@ import { rapidAPI } from '../apiClient.js';
 // birthday comes from the player profile — the standings list omits it, so the
 // rankings page enriches its Age column from here.
 //
-// Caching:
-//   titles         → 72h  (changes only after a title win)
-//   past-matches   → 6h   (updates after each match)
+// Caching (unchanged TTLs, only after the player exists):
+//   titles         → 72h  (changes only after a title win; 0 is cached for a real player)
+//   past-matches   → 6h   (updates after each match; never an empty list)
 //   tournament-map → 24h  (shared cache key with h2h.js)
 //   profile        → 30d  (birthday never changes)
+// A lookup with no past matches, or a thrown upstream error, is an edge-only
+// miss (no KV write): 10 min for an empty list, a 4xx, or an error body; 2 min
+// for a 5xx, 429, timeout, or unknown status.
+// Tour and playerKey are checked before any cache read or upstream call.
+// playerKey is 1–10 digits. Rate limit bucket: player-stats (fail closed).
 
 const TTL_TITLES   = 72 * 60 * 60;
 const TTL_MATCHES  =  6 * 60 * 60;
 const TTL_CALENDAR = 24 * 60 * 60;
 const TTL_PROFILE  = 30 * 24 * 60 * 60;
+const TTL_MISS     = 10 * 60;
+const TTL_UPSTREAM_MISS = 2 * 60;
 
 const MAIN_TOUR_RANK_ID = 2;
+const PLAYER_KEY_RE = /^\d{1,10}$/;
+
+function httpError(status, message) {
+    throw Object.assign(new Error(message), { status });
+}
+
+function parsePlayerKey(raw) {
+    if (raw == null || String(raw).trim() === '') httpError(400, 'playerKey is required');
+    const playerKey = String(raw).trim();
+    if (!PLAYER_KEY_RE.test(playerKey)) httpError(400, 'Invalid playerKey.');
+    return playerKey;
+}
+
+// 4xx (not 429) and an error body (2xx) stay for 10 minutes. 5xx, 429, a timeout,
+// and any status we cannot read are 2 minutes so a blip can recover.
+function upstreamMissTtl(err) {
+    const status = Number(err?.status);
+    if (!Number.isInteger(status)) return TTL_UPSTREAM_MISS;
+    if (status === 429 || status >= 500) return TTL_UPSTREAM_MISS;
+    if ((status >= 400 && status < 500) || (status >= 200 && status < 300)) return TTL_MISS;
+    return TTL_UPSTREAM_MISS;
+}
+
+function emptyStats() {
+    return {
+        titles: 0,
+        form: [],
+        wins: 0,
+        losses: 0,
+        winPct: null,
+        surface: {
+            hard:  { wins: 0, losses: 0 },
+            clay:  { wins: 0, losses: 0 },
+            grass: { wins: 0, losses: 0 },
+        },
+        birthday: null,
+    };
+}
 
 function normSurface(court) {
     if (!court) return 'hard';
@@ -57,12 +103,50 @@ async function getTournamentMap(env, tour) {
 }
 
 export async function handlePlayerStats(request, env) {
+    await rateLimit(env, request, 'player-stats');
+
     const { searchParams } = new URL(request.url);
-    const tour      = (searchParams.get('tour') || 'ATP').toUpperCase();
-    const playerKey = searchParams.get('playerKey');
-    if (!playerKey) throw new Error('playerKey is required');
+    const tour      = parseTour(searchParams.get('tour'));
+    const playerKey = parsePlayerKey(searchParams.get('playerKey'));
+
+    const miss = await cache.getEdge('player-stats-miss', tour, playerKey);
+    if (miss?.data?.miss === true) return emptyStats();
 
     const pid = Number(playerKey);
+
+    // ── Past matches (200 for surface coverage) ───────────────────────────────
+    // Existence is "has matches". An empty list is not written to KV. Titles and
+    // profile run only after that, so a made-up key cannot mint those entries.
+    const matchesCacheKey = ['player-past-matches-200', tour, playerKey];
+    let matches = [];
+    let upstreamEmpty = false;
+
+    const cachedMatches = await cache.get(env, ...matchesCacheKey);
+    if (Array.isArray(cachedMatches?.data)) {
+        matches = cachedMatches.data;
+        if (!matches.length) upstreamEmpty = true;
+    } else {
+        try {
+            const raw = await rapidAPI.playerPastMatches(env, tour, playerKey, 200);
+            matches = raw?.data || [];
+            if (matches.length) {
+                await cache.set(env, TTL_MATCHES, matches, ...matchesCacheKey);
+            } else {
+                upstreamEmpty = true;
+            }
+        } catch (e) {
+            console.error(`[player-stats] past-matches failed for ${tour}/${playerKey}:`, e.message);
+            await cache.setEdge(upstreamMissTtl(e), { miss: true }, 'player-stats-miss', tour, playerKey);
+            return emptyStats();
+        }
+    }
+
+    if (!matches.length) {
+        if (upstreamEmpty) {
+            await cache.setEdge(TTL_MISS, { miss: true }, 'player-stats-miss', tour, playerKey);
+        }
+        return emptyStats();
+    }
 
     // ── Titles ────────────────────────────────────────────────────────────────
     const titlesCacheKey = ['player-titles', tour, playerKey];
@@ -80,23 +164,6 @@ export async function handlePlayerStats(request, env) {
             await cache.set(env, TTL_TITLES, titles, ...titlesCacheKey);
         } catch (e) {
             console.error(`[player-stats] titles failed for ${tour}/${playerKey}:`, e.message);
-        }
-    }
-
-    // ── Past matches (200 for surface coverage) ───────────────────────────────
-    const matchesCacheKey = ['player-past-matches-200', tour, playerKey];
-    let matches = [];
-
-    const cachedMatches = await cache.get(env, ...matchesCacheKey);
-    if (cachedMatches) {
-        matches = cachedMatches.data;
-    } else {
-        try {
-            const raw = await rapidAPI.playerPastMatches(env, tour, playerKey, 200);
-            matches = raw?.data || [];
-            await cache.set(env, TTL_MATCHES, matches, ...matchesCacheKey);
-        } catch (e) {
-            console.error(`[player-stats] past-matches failed for ${tour}/${playerKey}:`, e.message);
         }
     }
 
