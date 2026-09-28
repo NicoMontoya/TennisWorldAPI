@@ -24,7 +24,7 @@ Every `rapidFetch` path in `src/apiClient.js`, plus Sackmann imports and api-ten
 | Historical rankings | Sackmann via `/api/admin/import-rankings-history`. `filter=RankingDate:` only from `/api/admin/backfill-rankings` | Time Machine `/api/rankings-history`; Player `/api/player-ranking-history`; Curves `/api/vintage-rank-by-age` | KV, no TTL. A profile GET also puts today’s rank | A for closed weeks. Today’s put is B, and not on a public read | `rankings` |
 | Birthday, static profile | `GET /{tour}/player/profile/{id}` | `/api/players` (Player, panel); birthday on `/api/player-stats`; Curves vintage | edge+KV 72h / 30d / 24h | A. Current rank is B | `players` |
 | Titles | `GET /{tour}/player/titles/{id}` | `/api/player-stats`; folded into `/api/player-history` | count 72h; history payload 12h | A through last season; B this season | `player_totals` / `player_stats_blob` |
-| H2H summary | `GET /{tour}/h2h/info/{a}/{b}` | Hub featured pair only. `/api/h2h` sums the match log + past matches | inside the hub 5min payload | derived | existing H2H store until Ops (a) |
+| H2H summary | `GET /{tour}/h2h/info/{a}/{b}` | Hub featured pair only. `/api/h2h` sums the match log + past matches | inside the hub 5min payload | derived | current H2H store for v1 |
 | Sackmann match log | CSVs → `/api/admin/import-matches`, `tw:matches:v1:*` | `/api/h2h` | KV, no TTL, cap 4000 | A | `matches` + `match_players`, zero API |
 | Sackmann curves | vintage, career rank arcs, rank-by-age imports | Curves; Player rank chart | KV no TTL; rank-by-age also edge 24h | A | `players`, `matches`, `rankings` |
 | Live board | `GET /extend/api/events/live` | `/api/livescore`, `/api/hub` | edge 30s or 2min; `:seen` edge 12h; `:done` KV 12h only when the completed set changes; hub 5min | C | RapidAPI + edge. No D1 |
@@ -87,7 +87,14 @@ player_stats_blob (player_id INTEGER PRIMARY KEY, built_at TEXT, json TEXT)
 - **`opp_rank`.** The job looks it up from `rankings` using the latest official `rank_date` on or before `match_date`. The hit rate is the 90% gate that decides whether the rank-band row ships in v1. Rank bands: `top10`, `11_50`, `51_100`, `101_plus`, `unknown`.
 - **Page read.** The page reads `player_stats_blob` only (one indexed row read per uncached view). `player_totals` and the blob are rebuilt in the same batch. Filtering happens in the browser.
 - **Rebuilds.** Idempotent: delete and reinsert each player's rows in one transaction.
-- **Size.** The first build is about 400 players, up to 500 matches each. Each match writes two `match_players` rows, so the ceiling (no match shared by two tracked players) is 400 × 500 × 2 = **400,000** rows — a few hundred thousand. D1 bills the table row plus one row per index ([pricing](https://developers.cloudflare.com/d1/platform/pricing/), footnote 6). Each insert hits the composite primary key and `INDEX (player_id, season)`, so 400,000 × 3 = **1,200,000** billed row-writes. At the free-tier cap of **100,000 rows written/day** that is **12 days**. That fits step 3 (cached KV + Sackmann, zero RapidAPI calls) before the step 5 API backfill, which waits for the quota reset on about 16 Oct 2026.
+- **Size.** The first build is about 400 players, up to 500 matches each. Each match writes two `match_players` rows, so the ceiling (no match shared by two tracked players) is 400 × 500 × 2 = **400,000** rows — a few hundred thousand. D1 bills the table row plus one row per index ([pricing](https://developers.cloudflare.com/d1/platform/pricing/), footnote 6). Each insert hits the composite primary key and `INDEX (player_id, season)` only — no opponent index in v1 — so 400,000 × 3 = **1,200,000** billed row-writes. At the free-tier cap of **100,000 rows written/day** that is **12 days**. That fits step 3 (cached KV + Sackmann, zero RapidAPI calls) before the step 5 API backfill, which waits for the quota reset on about 16 Oct 2026.
+- **H2H.** Stays on the current H2H store for v1. No opponent index now: D1 bills every index update as a row written, which would slow the first build. After the D1 data passes the 20-match cross-source comparison, H2H can move to D1 with an index on `match_players (player_id, opponent_id)`. That also removes the ordered-pair caching that caused the Sinner–Alcaraz mismatch.
+- **Types and checks** (future migration, not this PR):
+  - ID and grouping columns: `INTEGER NOT NULL` or `TEXT NOT NULL`. `won`, `has_stats`, `sv_games_est`, `lost_first_set`, `deciding_set`: `CHECK (x IN (0,1))`. `surface`, `level`, and `rank_band`: fixed lists, the same way `tournaments.surface` does.
+  - Stat counts: `INTEGER` NULL allowed, `CHECK (x IS NULL OR x >= 0)`. A match without stats stores NULL, never 0, plus `CHECK (has_stats = 1 OR sv_pts IS NULL)`.
+  - Cross-column checks: `first_won <= first_in <= sv_pts`, `bp_saved <= bp_faced`, `bp_converted <= bp_chances`, `ret_won <= ret_pts`. A violating import row fails its whole batch.
+  - `opp_rank`: `INTEGER` NULL allowed. NULL means rank unknown (distinct from unranked). `rank_band` records which.
+  - `player_totals` counts: `INTEGER NOT NULL DEFAULT 0`. Stat sums include only matches with stats. `matches_with_stats` is the denominator for every percentage.
 
 ## Read and write rules
 
@@ -96,6 +103,8 @@ player_stats_blob (player_id INTEGER PRIMARY KEY, built_at TEXT, json TEXT)
 - Public reads validate input, fail closed on rate limits, keep the edge cache, and use an index plus `LIMIT`.
 - Imports have a row cap, per-row validation, and one transaction per batch (under 50 queries per invocation).
 - Feed text is stored as plain text and rendered only with `textContent`.
+- `player_stats_blob` is written only by the job. The public route returns it as-is. The page renders every name and label inside it with `textContent` or `createElement` only.
+- Cap `player_stats_blob.json` at a fixed size (about 256 KB). The job refuses to write a larger blob: it logs and skips that player, so a bad build cannot serve something huge.
 - No account data in D1.
 - Schema changes are reviewed migration files. A destructive change needs Nico’s go and a restore point (Time Travel is 7 days on Free).
 - Worker binding only. No API token in the Worker or in `wrangler.toml`.
@@ -139,8 +148,3 @@ From the code, not from traffic. Miss counts are unmeasured and are not guessed.
 3. Retire the api-tennis leftovers, or leave them on KV?
 4. In-progress draws on the 6h cron, or sooner? Livescore stays 30s either way.
 5. Is Time Travel (7 days) enough as the restore point, or also a SQL export?
-
-**Ops**
-
-- (a) `match_players` has no PRIMARY KEY-only access for opponent lookups. Confirm whether an `(opponent_id)` index is needed, or whether H2H stays on the existing H2H store.
-- (b) Columns without declared types in `match_players` / `player_totals` should get explicit `INTEGER` / `TEXT` types and `NOT NULL` / `CHECK` constraints in the migration. Settle that with Analytics at migration time. Do not write the migration in this PR.
