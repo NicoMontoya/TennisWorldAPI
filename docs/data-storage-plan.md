@@ -14,38 +14,80 @@ Every `rapidFetch` path in `src/apiClient.js`, plus Sackmann imports and api-ten
 
 | Kind | Upstream | Read today | Cache today | Group | After |
 |---|---|---|---|---|---|
-| Finished matches | `GET /{tour}/tournament/results/{id}` | Draws `/api/draws`. Scores re-reads today in `/api/hub`, `/api/livescore` | Draws edge+KV 24h once the final is done, else 5min / 10min / 1h. Hub 5min edge. Livescore 30s, or 2min when idle | A finished. C live slice | `matches` |
-| Past-season player matches | `GET /{tour}/player/past-matches/{id}` | Player `/api/player-history` (500). Rankings, Player, panel `/api/player-stats` (200). Analytics, Player, panel `/api/h2h` (200, after the Sackmann cutoff). Curves `/api/player-vintage` (paged) | edge+KV 12h / 6h / 48h / 24h | A | `matches`. Never page before `players.firstApiSeason` |
+| Finished matches | `GET /{tour}/tournament/results/{id}` | Draws `/api/draws`. Scores re-reads today in `/api/hub`, `/api/livescore` | Draws edge+KV 24h once the final is done, else 5min / 10min / 1h. Hub 5min edge. Livescore 30s, or 2min when idle | A finished. C live slice | `matches` + `match_players` |
+| Past-season player matches | `GET /{tour}/player/past-matches/{id}` | Player `/api/player-history` (500). Rankings, Player, panel `/api/player-stats` (200). Analytics, Player, panel `/api/h2h` (200, after the Sackmann cutoff). Curves `/api/player-vintage` (paged) | edge+KV 12h / 6h / 48h / 24h | A | `matches` + `match_players`. Never page before `players.first_api_season` |
 | Current-season match tail | same | same four | a miss re-downloads the whole window | B | scheduled append |
-| Draw fixtures + info | `GET /{tour}/fixtures/tournament/{id}`, `GET /{tour}/tournament/info/{id}` | Draws. Hub + livescore use fixtures for today’s board | draws TTL above; hub/livescore edge | A when finished; B in progress; C today’s board | `draws`, `tournaments` |
-| Official first-round order | admin import of tour sheets, not RapidAPI | Draws, inside `/api/draws` | KV `tw:official-draw:v1:*`, no TTL | A | `draws` |
+| Draw fixtures + info | `GET /{tour}/fixtures/tournament/{id}`, `GET /{tour}/tournament/info/{id}` | Draws. Hub + livescore use fixtures for today’s board | draws TTL above; hub/livescore edge | A when finished; B in progress; C today’s board | `matches`, `tournaments` |
+| Official first-round order | admin import of tour sheets, not RapidAPI | Draws, inside `/api/draws` | KV `tw:official-draw:v1:*`, no TTL | A | not in this layout; stays KV |
 | Calendar | `GET /{tour}/tournament/calendar/{year}` (≤8 pages, ~5 used) | Draws `/api/calendar`; cron; hub + livescore (current year, uncached); 5-year map for h2h / history / stats; vintage tier map. Scripts `backfill-tier-map.ts`, `upcomingDraws.mjs`, `testDraws.mjs` | route 2h; map 24h; past year 30d. edge+KV | A past years; B this year | `tournaments` |
-| Current weekly rankings | `GET /{tour}/ranking/singles` | Rankings `/api/standings`; Curves roster; Draws on a miss; cron | edge+KV 48h (`standings2`), then a top-50 rank-arc put | B, dated with the feed’s ranking date | `rankings_snapshots` |
-| Historical rankings | Sackmann via `/api/admin/import-rankings-history`. `filter=RankingDate:` only from `/api/admin/backfill-rankings` | Time Machine `/api/rankings-history`; Player `/api/player-ranking-history`; Curves `/api/vintage-rank-by-age` | KV, no TTL. A profile GET also puts today’s rank | A for closed weeks. Today’s put is B, and not on a public read | `rankings_snapshots` |
+| Current weekly rankings | `GET /{tour}/ranking/singles` | Rankings `/api/standings`; Curves roster; Draws on a miss; cron | edge+KV 48h (`standings2`), then a top-50 rank-arc put | B, dated with the feed’s ranking date | `rankings` |
+| Historical rankings | Sackmann via `/api/admin/import-rankings-history`. `filter=RankingDate:` only from `/api/admin/backfill-rankings` | Time Machine `/api/rankings-history`; Player `/api/player-ranking-history`; Curves `/api/vintage-rank-by-age` | KV, no TTL. A profile GET also puts today’s rank | A for closed weeks. Today’s put is B, and not on a public read | `rankings` |
 | Birthday, static profile | `GET /{tour}/player/profile/{id}` | `/api/players` (Player, panel); birthday on `/api/player-stats`; Curves vintage | edge+KV 72h / 30d / 24h | A. Current rank is B | `players` |
-| Titles | `GET /{tour}/player/titles/{id}` | `/api/player-stats`; folded into `/api/player-history` | count 72h; history payload 12h | A through last season; B this season | `player_season_totals` |
-| H2H summary | `GET /{tour}/h2h/info/{a}/{b}` | Hub featured pair only. `/api/h2h` sums the match log + past matches | inside the hub 5min payload | derived | hub reads `matches` |
-| Sackmann match log | CSVs → `/api/admin/import-matches`, `tw:matches:v1:*` | `/api/h2h` | KV, no TTL, cap 4000 | A | `matches`, zero API |
-| Sackmann curves | vintage, career rank arcs, rank-by-age imports | Curves; Player rank chart | KV no TTL; rank-by-age also edge 24h | A | `players`, `matches`, `rankings_snapshots` |
+| Titles | `GET /{tour}/player/titles/{id}` | `/api/player-stats`; folded into `/api/player-history` | count 72h; history payload 12h | A through last season; B this season | `player_totals` / `player_stats_blob` |
+| H2H summary | `GET /{tour}/h2h/info/{a}/{b}` | Hub featured pair only. `/api/h2h` sums the match log + past matches | inside the hub 5min payload | derived | existing H2H store until Ops (a) |
+| Sackmann match log | CSVs → `/api/admin/import-matches`, `tw:matches:v1:*` | `/api/h2h` | KV, no TTL, cap 4000 | A | `matches` + `match_players`, zero API |
+| Sackmann curves | vintage, career rank arcs, rank-by-age imports | Curves; Player rank chart | KV no TTL; rank-by-age also edge 24h | A | `players`, `matches`, `rankings` |
 | Live board | `GET /extend/api/events/live` | `/api/livescore`, `/api/hub` | edge 30s or 2min; `:seen` edge 12h; `:done` KV 12h only when the completed set changes; hub 5min | C | RapidAPI + edge. No D1 |
 | Per-event live score | `GET /extend/api/event/live-score/get/{id}` | none (`liveScoreByEventId` unused) | none | C | do not store |
 | api-tennis.com leftovers | `get_fixtures`, `get_tournaments`, `get_standings`, `get_players`. `get_H2H` has no caller | `/api/fixtures`, `/api/surface-standings` only from unmounted `script.js`. `/api/tournaments` has no page | edge+KV 24h / 48h / 24h. Profiles use another id namespace | out of scope | stay on KV. Do not copy into D1 or replace with RapidAPI |
 
 `/api/predict` (Draws bar, bracket autofill, Analytics) calls standings, player-stats, and h2h, then edge+KV 6h. It follows those routes. The Supabase stub in `src/db.js` is not this plan.
 
-## Tables
+## Table layout (owned by TW Analytics)
 
-Analytics owns columns. `players.firstApiSeason` is the earliest season RapidAPI returned for that player; Sackmann rows may be older, and no job may request a season before it.
+```sql
+players (
+  player_id INTEGER PRIMARY KEY,
+  api_id INTEGER UNIQUE,            -- tennis API id, e.g. 47275
+  sackmann_id INTEGER UNIQUE,       -- the number in our s-keys
+  tour TEXT CHECK (tour IN ('atp','wta')),
+  name TEXT, country TEXT, birth_date TEXT,
+  first_api_season INTEGER,         -- feeds the Indoor caption
+  stats_built_at TEXT )
 
-| Table | Purpose |
-|---|---|
-| `players` | Name, country, birthday, ids, `firstApiSeason`. |
-| `matches` | One row per match: Sackmann log, finished results, current-season tail. |
-| `match_stats` | Finished-match stat lines, written once. Nothing writes this today. Live points stay group C. |
-| `tournaments` | Calendar: name, surface, tier, dates, year. |
-| `draws` | Edition, in progress or finished, official first-round order. |
-| `rankings_snapshots` | Weekly list, keyed by the feed’s official date. |
-| `player_season_totals` | Totals by season, surface, level, opponent rank band. First feature on D1. |
+tournaments (
+  tournament_id INTEGER PRIMARY KEY,
+  source TEXT, source_id TEXT, season INTEGER, name TEXT,
+  surface TEXT CHECK (surface IN ('hard','clay','grass','carpet')),
+  indoor INTEGER,                   -- 1/0; NULL for Sackmann (unknown)
+  level TEXT,                       -- slam|finals|1000|500_250|challenger|itf|team
+  UNIQUE (source, source_id, season) )
+
+matches (
+  match_id INTEGER PRIMARY KEY, source TEXT, source_id TEXT,
+  tournament_id INTEGER, match_date TEXT, season INTEGER, round TEXT,
+  best_of INTEGER, winner_id INTEGER, loser_id INTEGER, score TEXT,
+  outcome TEXT CHECK (outcome IN ('completed','retired','walkover')),
+  UNIQUE (source, source_id) )
+
+match_players (                     -- 2 rows per match, one per player
+  match_id, player_id, opponent_id, PRIMARY KEY (match_id, player_id),
+  season, surface, indoor, level,   -- copied from the match for fast grouping
+  won, opp_rank, has_stats,
+  sv_pts, first_in, first_won, second_won, aces, dfs,
+  bp_faced, bp_saved, sv_games, sv_games_est,
+  ret_pts, ret_won, bp_chances, bp_converted, ret_games,  -- copied from the opponent's serve
+  sets_won, sets_lost, tb_won, tb_lost, lost_first_set, deciding_set )
+INDEX match_players (player_id, season)
+
+rankings (tour, rank_date, player_id, rank, PRIMARY KEY (tour, rank_date, player_id))
+
+player_totals (                     -- rebuilt per player by the job
+  player_id, season, surface, level, rank_band, source,
+  matches, matches_with_stats, wins, losses, <every count above, summed>,
+  PRIMARY KEY (player_id, season, surface, level, rank_band) )
+
+player_stats_blob (player_id INTEGER PRIMARY KEY, built_at TEXT, json TEXT)
+```
+
+- **Player IDs.** One `player_id` per person, whichever source saw them first. Sackmann and API seasons attach to that same player via `api_id` / `sackmann_id`.
+- **Surface.** API `courtId` 3 is stored as `hard` with `indoor=1`. Sackmann carpet stays `carpet`, `indoor` NULL, and counts under the Indoor filter.
+- **Two sources, one season.** Both sources may hold the same match (needed for the 20-match cross-source comparison). Totals use Sackmann only for seasons before `first_api_season` and never mix sources within a season.
+- **Walkovers and retirements.** Walkovers are stored but excluded from records and stats. Retirements count in W-L; their stats count only if the first set was completed.
+- **`opp_rank`.** The job looks it up from `rankings` using the latest official `rank_date` on or before `match_date`. The hit rate is the 90% gate that decides whether the rank-band row ships in v1. Rank bands: `top10`, `11_50`, `51_100`, `101_plus`, `unknown`.
+- **Page read.** The page reads `player_stats_blob` only (one indexed row read per uncached view). `player_totals` and the blob are rebuilt in the same batch. Filtering happens in the browser.
+- **Rebuilds.** Idempotent: delete and reinsert each player's rows in one transaction.
+- **Size.** The first build is about 400 players, up to 500 matches each. Each match writes two `match_players` rows, so the ceiling (no match shared by two tracked players) is 400 × 500 × 2 = **400,000** rows — a few hundred thousand. D1 bills the table row plus one row per index ([pricing](https://developers.cloudflare.com/d1/platform/pricing/), footnote 6). Each insert hits the composite primary key and `INDEX (player_id, season)`, so 400,000 × 3 = **1,200,000** billed row-writes. At the free-tier cap of **100,000 rows written/day** that is **12 days**. That fits step 3 (cached KV + Sackmann, zero RapidAPI calls) before the step 5 API backfill, which waits for the quota reset on about 16 Oct 2026.
 
 ## Read and write rules
 
@@ -78,7 +120,7 @@ Analytics owns columns. `players.firstApiSeason` is the earliest season RapidAPI
 3. Load data we already have, at zero API cost: KV `tw:matches:v1:*`, Sackmann CSVs, cached rankings and vintage.
 4. Switch reads route by route. Edge cache stays in front. A miss reads D1 and does not write.
 5. API backfill of FINAL rows only after the quota reset (about 16 Oct 2026), under a daily call budget.
-6. First D1 feature: `player_season_totals` by season, surface, level, and opponent rank band.
+6. First D1 feature: `player_totals` and `player_stats_blob` (season, surface, level, rank band). The page reads the blob.
 
 ## Estimated savings
 
@@ -97,3 +139,8 @@ From the code, not from traffic. Miss counts are unmeasured and are not guessed.
 3. Retire the api-tennis leftovers, or leave them on KV?
 4. In-progress draws on the 6h cron, or sooner? Livescore stays 30s either way.
 5. Is Time Travel (7 days) enough as the restore point, or also a SQL export?
+
+**Ops**
+
+- (a) `match_players` has no PRIMARY KEY-only access for opponent lookups. Confirm whether an `(opponent_id)` index is needed, or whether H2H stays on the existing H2H store.
+- (b) Columns without declared types in `match_players` / `player_totals` should get explicit `INTEGER` / `TEXT` types and `NOT NULL` / `CHECK` constraints in the migration. Settle that with Analytics at migration time. Do not write the migration in this PR.
