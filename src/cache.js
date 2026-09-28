@@ -3,9 +3,8 @@
 // ===================================
 // Layer 1 — Cloudflare Cache API (edge, very fast, ~free)
 //   Bypassed in local wrangler dev (Cache API unavailable) — silent fail.
-//   Hub payloads and the livescore board live here (setEdge). A successful
-//   livescore fill also writes one no-expiry KV stale copy (setStale).
-//   Rate-limit counters are also Cache API (security.js).
+//   Hub and livescore payloads live here (setEdge) so they do not burn
+//   Free-tier KV writes. Rate-limit counters are also Cache API (security.js).
 //
 // Layer 2 — Workers KV (persistent, global, survives restarts)
 //   Primary entries have TTL set by each route.
@@ -168,25 +167,6 @@ export const cache = {
                 staleKey,
                 JSON.stringify({ data: value, cachedAt, stale: true }),
             );
-        } catch {
-            console.warn('[cache] KV stale put failed (quota or transient)');
-        }
-    },
-
-    /**
-     * setStale(env, value, ...keyParts[, { fetchedAt }])
-     * KV stale backup only — no TTL primary, no edge write. Livescore uses
-     * this so an edge miss during an outage or hard stop can still serve the
-     * last board and its original fetch time. One put per successful fill.
-     */
-    async setStale(env, value, ...keyParts) {
-        const { parts, fetchedAt } = takeFetchedAtOption(keyParts);
-        const staleKey = buildKey(...parts, 'stale');
-        const cachedAt = new Date().toISOString();
-        const payload = { data: value, cachedAt, stale: true };
-        if (typeof fetchedAt === 'string' && fetchedAt) payload.fetchedAt = fetchedAt;
-        try {
-            await env.TENNIS_CACHE.put(staleKey, JSON.stringify(payload));
         } catch {
             console.warn('[cache] KV stale put failed (quota or transient)');
         }
