@@ -319,7 +319,14 @@ describe('livescore TTL stays edge-only', () => {
         const edgeSpy = vi.spyOn(cache, 'setEdge');
         const data = await handleLivescore(get('/api/livescore?tour=ATP'), env);
         expect(data.some(m => m.status === 'Not Started')).toBe(true);
-        expect(edgeSpy).toHaveBeenCalledWith(60, expect.any(Array), 'livescore3', 'ATP', 'all');
+        expect(edgeSpy).toHaveBeenCalledWith(
+            60,
+            expect.any(Array),
+            'livescore3',
+            'ATP',
+            'all',
+            expect.objectContaining({ fetchedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) }),
+        );
         expect(env.puts).toEqual([]);
         expect([...env.store.keys()].filter(k => k.includes('livescore'))).toEqual([]);
         expect(globalThis.fetch).not.toHaveBeenCalled();

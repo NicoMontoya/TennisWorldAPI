@@ -15,6 +15,7 @@ import {
     QUOTA_RESET_MIN_SEC,
     QuotaStopError,
     clampQuotaReset,
+    hardStopMode,
     resetQuotaStopStateForTests,
 } from './quotaStop.js';
 
@@ -227,6 +228,34 @@ describe('RapidAPI quota hard stop', () => {
             expect(calls).toHaveLength(2);
             expect(flagPuts(env)).toHaveLength(0);
             assertLogsClean();
+        },
+    );
+
+    it.each([
+        [undefined, 'off'],
+        ['off', 'off'],
+        ['on', 'on'],
+        ['force', 'force'],
+        ['', 'on'],
+        ['ON ', 'on'],
+        ['Off', 'on'],
+        ['offf', 'on'],
+    ])('RAPIDAPI_HARD_STOP %j -> %s', (value, expected) => {
+        const env = value === undefined ? {} : { RAPIDAPI_HARD_STOP: value };
+        expect(hardStopMode(env)).toBe(expected);
+        expect(hardStopMode(undefined)).toBe('off');
+    });
+
+    it.each(['', 'ON ', 'Off', 'offf'])(
+        '%j behaves as on: the first call fetches, the next one stops',
+        async (value) => {
+            const env = mockEnv(value);
+            const calls = rankingsFetch('-6004', '3600');
+            await rapidAPI.rankings(env, 'ATP', 5);
+            expect(calls).toHaveLength(1);
+            await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toBeInstanceOf(QuotaStopError);
+            expect(calls).toHaveLength(1);
+            expect(flagPuts(env)).toHaveLength(1);
         },
     );
 

@@ -121,7 +121,9 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
 - **`RAPIDAPI_HARD_STOP`** (`wrangler.toml` `[vars]`, ships as `off`). `on` stops
   new RapidAPI calls after a response shows the monthly quota is exhausted
   (`x-ratelimit-requests-remaining` missing, non-numeric, zero, or negative).
-  `off` never stops. `force` stops immediately. Unset is `off`. There is no
+  `off` never stops. `force` stops immediately. Unset is `off`. Only the exact
+  strings `off`, `on`, and `force` are recognized; any other present value
+  (blank, different case, trailing space, typo) acts as `on`. There is no
   route to change it. The shared flag is one KV write (`{until}`), read back
   through a 60s edge cache. A missing remaining-header on 3 consecutive
   responses in one location also stops that location locally (edge only, no
@@ -130,6 +132,9 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
   results; live scores stay frozen on the last edge payload; pages with nothing
   cached return their usual empty body or a generic upstream 503. Responses
   never include the remaining count, the reset, or whether the stop is on.
+  `/api/livescore` and `/api/hub` also include a top-level `fetchedAt` string
+  (ISO 8601 UTC, worker clock at the successful upstream fetch). Cache hits
+  and quota-stop fallbacks return that original time, not the serve time.
 
 ## Security notes
 

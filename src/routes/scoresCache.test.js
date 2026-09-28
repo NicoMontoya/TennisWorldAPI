@@ -163,6 +163,7 @@ describe('hub/livescore cache freshness + fail-soft', () => {
             'livescore3',
             'ATP',
             'all',
+            expect.objectContaining({ fetchedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) }),
         );
         expect(setSpy).not.toHaveBeenCalledWith(
             env,
@@ -193,6 +194,7 @@ describe('hub/livescore cache freshness + fail-soft', () => {
             expect.objectContaining({ tournament: expect.objectContaining({ key: '99' }) }),
             'hub3',
             'ATP',
+            expect.objectContaining({ fetchedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) }),
         );
         expect(setSpy).not.toHaveBeenCalledWith(
             env,

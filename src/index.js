@@ -21,6 +21,7 @@ import { handleVintageRankByAge, handleImportVintageRankByAge } from './routes/v
 import { handlePlayerRankHistory, seedRankSnapshots } from './routes/playerRankHistory.js';
 import { getCalendarYear } from './calendarYear.js';
 import { isQuotaStop } from './quotaStop.js';
+import { takeFetchedAt } from './fetchedAt.js';
 import { handleBackfillRankings, handleClearRankHistory, handleImportRankHistory, handleImportMatches } from './routes/adminBackfill.js';
 import { handleImportOfficialDraw } from './routes/officialDrawAdmin.js';
 import { handleRankingsHistory, handleImportRankingsHistory } from './routes/rankingsHistory.js';
@@ -181,7 +182,12 @@ export default {
 
         try {
             const data = await handler(request, env);
-            return jsonResponse({ ok: true, data }, 200, env, request);
+            const body = { ok: true, data };
+            // Livescore (and hub, when it is serving live scores) stamps the
+            // upstream fetch time. One field, no quota or stop state.
+            const fetchedAt = takeFetchedAt(data);
+            if (fetchedAt) body.fetchedAt = fetchedAt;
+            return jsonResponse(body, 200, env, request);
         } catch (err) {
             console.error(`[${pathname}]`, err.message);
             const status = err.status || 500;

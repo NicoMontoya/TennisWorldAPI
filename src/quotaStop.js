@@ -2,9 +2,11 @@
 //
 // RAPIDAPI_HARD_STOP (Worker var, not a request):
 //   on    — after a response shows the quota is exhausted, skip further paid calls
-//   off   — never stop (also the default when the var is unset or unrecognized)
+//   off   — never stop
 //   force — skip paid calls immediately, flag or not
-// There is no route that changes it.
+// Only those exact strings count. Unset or undefined defaults to off.
+// Any other present value (blank, different case, trailing space, typo)
+// behaves as on. There is no route that changes it.
 //
 // The shared flag is one KV key, tw:quota:stop:v1 = { until }, written at most
 // once per trip. Each isolate reads that flag through a 60s Cache API entry,
@@ -52,9 +54,10 @@ export function isQuotaStop(err) {
 }
 
 export function hardStopMode(env) {
-    const raw = String(env?.RAPIDAPI_HARD_STOP ?? '').trim().toLowerCase();
+    if (env?.RAPIDAPI_HARD_STOP === undefined) return 'off';
+    const raw = env.RAPIDAPI_HARD_STOP;
     if (raw === 'on' || raw === 'off' || raw === 'force') return raw;
-    return 'off';
+    return 'on';
 }
 
 /** Seconds until we look again. Missing/invalid → 24h. Always within 60s–31d. */

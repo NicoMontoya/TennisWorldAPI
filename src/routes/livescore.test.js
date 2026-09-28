@@ -258,6 +258,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
             'livescore3',
             'ATP',
             'all',
+            expect.objectContaining({ fetchedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) }),
         );
         expect(setSpy).not.toHaveBeenCalledWith(
             env,
@@ -268,13 +269,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
             'all',
             expect.anything(),
         );
-        expect(edgeSpy).not.toHaveBeenCalledWith(
-            TTL.livescoreIdle,
-            expect.anything(),
-            expect.anything(),
-            expect.anything(),
-            expect.anything(),
-        );
+        expect(edgeSpy.mock.calls.filter(c => c[0] === TTL.livescoreIdle)).toEqual([]);
 
         edgeSpy.mockClear();
         env.TENNIS_CACHE._store.clear();
@@ -287,6 +282,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
             'livescore3',
             'ATP',
             'all',
+            expect.objectContaining({ fetchedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) }),
         );
     });
 
@@ -318,6 +314,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
             'livescore3',
             'ATP',
             'all',
+            expect.objectContaining({ fetchedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) }),
         );
     });
 

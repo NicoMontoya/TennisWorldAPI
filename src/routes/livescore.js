@@ -2,6 +2,7 @@ import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
 import { getCalendarYear } from '../calendarYear.js';
+import { stampFetchedAt } from '../fetchedAt.js';
 import { parseTour, parseTournamentKey, rateLimit } from '../security.js';
 import {
     ROUND_NAME,
@@ -146,14 +147,25 @@ export async function handleLivescore(request, env) {
     const cacheKey = ['livescore3', tour, tournamentKey || 'all'];
 
     const cached = await cache.get(env, ...cacheKey);
-    if (cached) return cached.data;
+    if (cached && Array.isArray(cached.data)) {
+        // Edge hit and any later read of this entry keep the original
+        // upstream time, not the time this request is served.
+        return stampFetchedAt(cached.data, cached.fetchedAt);
+    }
 
     const now      = new Date();
     const todayStr = now.toISOString().split('T')[0];
+    // Worker clock at the first successful upstream response in this fill.
+    let fetchedAt = null;
+    const markFetched = () => {
+        if (!fetchedAt) fetchedAt = new Date().toISOString();
+    };
 
     let liveRaw = [];
     try {
         liveRaw = await rapidAPI.liveEvents(env);
+        // Missing key returns [] without a paid call. A hard stop throws.
+        if (env?.RAPIDAPI_KEY) markFetched();
     } catch {
         liveRaw = [];
     }
@@ -195,6 +207,7 @@ export async function handleLivescore(request, env) {
             rapidAPI.tournamentFixtures(env, tour, tid),
             rapidAPI.tournamentResults(env, tour, tid),
         ]);
+        if (fx.status === 'fulfilled' || rs.status === 'fulfilled') markFetched();
         fixturesByTid.set(tid, fx.status === 'fulfilled' ? (fx.value?.data || []) : []);
         resultsByTid.set(tid, rs.status === 'fulfilled' ? (rs.value?.data?.singles || []) : []);
     }));
@@ -258,9 +271,10 @@ export async function handleLivescore(request, env) {
     // InPlay mid-window would stay hidden until expiry (Scores flicker).
     // Payload is Cache API only — no KV put (Free-tier write budget).
     try {
-        await cache.setEdge(livescoreTtlFor(data), data, ...cacheKey);
+        const edgeArgs = fetchedAt ? [{ fetchedAt }] : [];
+        await cache.setEdge(livescoreTtlFor(data), data, ...cacheKey, ...edgeArgs);
     } catch { /* edge put is already fail-soft */ }
-    return data;
+    return stampFetchedAt(data, fetchedAt);
 }
 
 /** 60s while anything is live, scheduled, or delayed; 120s only when nothing can go InPlay. */
