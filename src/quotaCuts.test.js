@@ -265,7 +265,8 @@ describe('yearly calendar cache', () => {
         // WTA is a different tour key, so this is the one extra yearly read.
         expect(yearCalls(year)).toHaveLength(2);
         expect([...env.store.keys()].some(k => k.startsWith('tw:calendar2:'))).toBe(false);
-        expect([...env.store.keys()].filter(k => k.includes('hub') || k.includes('livescore'))).toEqual([]);
+        expect([...env.store.keys()].filter(k => k.includes('hub'))).toEqual([]);
+        expect([...env.store.keys()].filter(k => k.includes('livescore'))).toEqual(['tw:livescore3:ATP:all:stale']);
     });
 });
 
@@ -327,8 +328,8 @@ describe('livescore TTL stays edge-only', () => {
             'all',
             expect.objectContaining({ fetchedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) }),
         );
-        expect(env.puts).toEqual([]);
-        expect([...env.store.keys()].filter(k => k.includes('livescore'))).toEqual([]);
+        expect(env.puts).toEqual(['tw:livescore3:ATP:all:stale']);
+        expect([...env.store.keys()].filter(k => k.includes('livescore'))).toEqual(['tw:livescore3:ATP:all:stale']);
         expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 });

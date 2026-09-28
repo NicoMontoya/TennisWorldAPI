@@ -176,9 +176,12 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         );
         const kvKeys = [...env.TENNIS_CACHE._store.keys()];
         expect(kvKeys).not.toContain('tw:livescore3:ATP:all');
-        expect(kvKeys.filter(k => k.includes('livescore'))).toEqual([]);
-        // Yearly calendar is KV+edge. Livescore payload and its :stale copy are not.
-        expect(kvKeys.filter(k => k.endsWith(':stale')).every(k => k.startsWith('tw:calendar-year:'))).toBe(true);
+        // Primary board key stays off KV. One stale copy keeps the last board
+        // and its original fetch time for an outage or hard stop.
+        expect(kvKeys.filter(k => k.includes('livescore'))).toEqual(['tw:livescore3:ATP:all:stale']);
+        expect(kvKeys.filter(k => k.endsWith(':stale')).every(k =>
+            k.startsWith('tw:calendar-year:') || k.startsWith('tw:livescore3:'),
+        )).toBe(true);
         expect(kvKeys.filter(k => k.startsWith('_rl:'))).toEqual([]);
         expect(caches.default._store.has('https://tennisworld-cache.internal/tw:livescore3:ATP:all')).toBe(true);
     });

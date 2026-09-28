@@ -2,7 +2,7 @@ import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
 import { getCalendarYear } from '../calendarYear.js';
-import { stampFetchedAt } from '../fetchedAt.js';
+import { LIVESCORE_FETCHED_AT_UNKNOWN, normalizeFetchedAt, stampFetchedAt } from '../fetchedAt.js';
 import { parseTour, parseTournamentKey, rateLimit } from '../security.js';
 import {
     ROUND_NAME,
@@ -135,8 +135,10 @@ async function loadCalendar(env, tour, now) {
 // Response is the existing fixtures-board shape (string[] setScores) plus
 // currentGame when InPlay. 60s TTL when InPlay, scheduled, or delayed;
 // idle 2 min only when the board is finished-only / empty.
-// Payload is Cache API only (no KV put). Sticky-completion `:done` still
-// uses KV when the completed-match set changes.
+// The live payload is edge-cached. A successful fill also writes one
+// no-expiry KV stale copy so an outage or hard stop can serve that board.
+// The primary KV key is not written. Sticky-completion `:done` still uses
+// KV when the completed-match set changes.
 export async function handleLivescore(request, env) {
     await rateLimit(env, request, 'livescore');
 
@@ -148,9 +150,11 @@ export async function handleLivescore(request, env) {
 
     const cached = await cache.get(env, ...cacheKey);
     if (cached && Array.isArray(cached.data)) {
-        // Edge hit and any later read of this entry keep the original
-        // upstream time, not the time this request is served.
-        return stampFetchedAt(cached.data, cached.fetchedAt);
+        // Edge hit (and a KV primary, if one exists) keeps the original
+        // upstream time. cachedAt is only a stand-in for entries written
+        // before fetchedAt was stored.
+        const at = normalizeFetchedAt(cached.fetchedAt || cached.cachedAt);
+        return stampFetchedAt(cached.data, at);
     }
 
     const now      = new Date();
@@ -267,15 +271,52 @@ export async function handleLivescore(request, env) {
     await persistSeenLive(env, tour, seenKey, snapshot, prevSeen);
     data = data.map(stripStickyFlag);
 
-    // Match-day fixtures-only boards must not use the 120s idle TTL — a new
-    // InPlay mid-window would stay hidden until expiry (Scores flicker).
-    // Payload is Cache API only — no KV put (Free-tier write budget).
-    try {
-        const edgeArgs = fetchedAt ? [{ fetchedAt }] : [];
-        await cache.setEdge(livescoreTtlFor(data), data, ...cacheKey, ...edgeArgs);
-    } catch { /* edge put is already fail-soft */ }
-    return stampFetchedAt(data, fetchedAt);
+    // A successful upstream fill remembers its clock time on the edge entry,
+    // a no-expiry KV stale copy, and a long-lived edge marker. Failures do
+    // not invent a new time.
+    if (fetchedAt) {
+        try {
+            await cache.setEdge(livescoreTtlFor(data), data, ...cacheKey, { fetchedAt });
+        } catch { /* edge put is already fail-soft */ }
+        try {
+            await cache.setStale(env, data, ...cacheKey, { fetchedAt });
+        } catch { /* KV stale is best-effort */ }
+        try {
+            await cache.setEdge(LIVESCORE_FETCHED_AT_MARKER_TTL, fetchedAt, ...cacheKey, 'fetched-at');
+        } catch { /* marker is best-effort */ }
+        return stampFetchedAt(data, fetchedAt);
+    }
+
+    return serveLivescoreFallback(env, cacheKey);
 }
+
+// No successful upstream response this request. Serve the KV stale board
+// when we have one; otherwise the empty board with the last known fetch
+// time, or the epoch when nothing was ever fetched.
+async function serveLivescoreFallback(env, cacheKey) {
+    const stale = await cache.getStale(env, ...cacheKey);
+    if (stale && Array.isArray(stale.data)) {
+        const at = normalizeFetchedAt(stale.fetchedAt || stale.cachedAt);
+        try {
+            await cache.setEdge(livescoreTtlFor(stale.data), stale.data, ...cacheKey, { fetchedAt: at });
+        } catch { /* next miss can read KV again */ }
+        return stampFetchedAt(stale.data, at);
+    }
+
+    let known = null;
+    try {
+        const marker = await cache.getEdge(...cacheKey, 'fetched-at');
+        if (typeof marker?.data === 'string') known = marker.data;
+    } catch { /* treat as unknown */ }
+    const at = normalizeFetchedAt(known || LIVESCORE_FETCHED_AT_UNKNOWN);
+    const empty = [];
+    try {
+        await cache.setEdge(TTL.livescoreIdle, empty, ...cacheKey, { fetchedAt: at });
+    } catch { /* header is still set on this response */ }
+    return stampFetchedAt(empty, at);
+}
+
+const LIVESCORE_FETCHED_AT_MARKER_TTL = 31 * 24 * 60 * 60;
 
 /** 60s while anything is live, scheduled, or delayed; 120s only when nothing can go InPlay. */
 export function livescoreTtlFor(board) {
