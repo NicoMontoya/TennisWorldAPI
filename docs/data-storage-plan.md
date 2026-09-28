@@ -81,7 +81,7 @@ player_stats_blob (player_id INTEGER PRIMARY KEY, built_at TEXT, json TEXT)
 ```
 
 - **Player IDs.** One `player_id` per person, whichever source saw them first. Sackmann and API seasons attach to that same player via `api_id` / `sackmann_id`.
-- **`first_api_season`.** The first build fetches older past-matches pages for each player until a page returns no stats, and records the earliest season that had stats as `first_api_season`. After that, no job requests anything older.
+- **`first_api_season`.** The first build fetches older past-matches pages for each player until a page returns no stats, and records the earliest season that had stats as `first_api_season`. The walk also stops at 10 pages of 50 per player even if every page still has stats. After that, no job requests anything older.
 - **Stats live on `match_players`.** There is no separate stats table. Each match has two rows, and return counts are copied from the opponent's serve. A match without stats stores NULL in the stat columns, never zeros.
 - **Surface.** API `courtId` 3 is stored as `hard` with `indoor=1`. Sackmann carpet stays `carpet`, `indoor` NULL, and counts under the Indoor filter.
 - **Two sources, one season.** Both sources may hold the same match (needed for the 20-match cross-source comparison). Totals use Sackmann only for seasons before `first_api_season` and never mix sources within a season.
@@ -110,6 +110,10 @@ player_stats_blob (player_id INTEGER PRIMARY KEY, built_at TEXT, json TEXT)
 - No account data in D1.
 - Schema changes are reviewed migration files. A destructive change needs Nico’s go and a restore point (Time Travel is 7 days on Free).
 - Worker binding only. No API token in the Worker or in `wrangler.toml`.
+- **D1 daily write budget.** The build job sums `meta.rows_written` on every statement and batch result and stops for the UTC day at a fixed budget of 80,000 rows written, under the 100,000 free cap, because reads also fail once the account exceeds the cap. It checkpoints progress and resumes the next UTC day. Admin imports and the delete-and-reinsert rebuilds count against the same budget. Deletes and index updates bill as writes. The running total is persisted per UTC day so a new invocation continues the count.
+- **Public read fallback.** If a D1 read errors, the route serves the edge copy when one exists. Otherwise it returns a generic 503 that does not mention limits or the cap. That failure is cached at the edge for 60 to 120 seconds so a visitor cannot retry D1 on every request.
+- **First-build walk page cap.** The older-pages walk that discovers `first_api_season` stops at 10 pages of 50 per player (500 matches), even if every page still has stats. This cap sits on top of the RapidAPI hard stop and step 5's daily call budget.
+- **New D1 admin imports.** POST only. They fail closed with 401 when the admin secret is missing or wrong, the same rule as the existing admin routes.
 
 ## Rollout
 
