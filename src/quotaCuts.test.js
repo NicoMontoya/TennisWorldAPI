@@ -8,6 +8,7 @@ import { handleCalendar } from './routes/calendar.js';
 import { handleDraws } from './routes/draws.js';
 import { handlePlayerStats } from './routes/playerStats.js';
 import { handleScheduled, RANK_SEED_UTC_HOUR } from './index.js';
+import { seedRankSnapshots } from './routes/playerRankHistory.js';
 import worker from './index.js';
 
 const calendar = vi.fn();
@@ -371,6 +372,9 @@ describe('cron rank snapshots', () => {
         await handleScheduled(env, { scheduledTime: at(12) });
         expect(keys()).toContain('tw:rank-history:v1:ATP:47275');
         expect(keys()).toContain('tw:rank-history:v1:WTA:12345');
+        expect(JSON.parse(env.store.get('tw:rank-history:v1:ATP:47275'))).toEqual([
+            { date: '2026-07-14', rank: 1 },
+        ]);
         expect(rankingsPaged.mock.calls.length).toBe(rankingCalls);
 
         installMockCaches();
@@ -378,6 +382,51 @@ describe('cron rank snapshots', () => {
         await handleScheduled(later, { scheduledTime: at(18) });
         expect([...later.store.keys()].some(k => k.startsWith('tw:rank-history:'))).toBe(false);
         expect([...later.store.keys()]).toContain('tw:standings2:ATP');
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('stores a Monday ranking under Monday when the job runs Tuesday, and does not rewrite that week', async () => {
+        const monday = '2026-09-21';
+        const tuesdayNoon = Date.UTC(2026, 8, 22, 12, 0, 0);
+        const thursdayNoon = Date.UTC(2026, 8, 24, 12, 0, 0);
+        rankingsPaged.mockImplementation(async (_env, tour) => ({
+            data: [{
+                position: 1,
+                point: 9000,
+                date: `${monday}T00:00:00.000Z`,
+                player: {
+                    id: tour === 'WTA' ? 12345 : 47275,
+                    name: tour === 'WTA' ? 'Sabalenka' : 'Sinner',
+                    countryAcr: 'ITA',
+                },
+            }],
+        }));
+
+        await handleScheduled(env, { scheduledTime: tuesdayNoon });
+
+        const atp = JSON.parse(env.store.get('tw:rank-history:v1:ATP:47275'));
+        const wta = JSON.parse(env.store.get('tw:rank-history:v1:WTA:12345'));
+        expect(atp).toEqual([{ date: monday, rank: 1 }]);
+        expect(wta).toEqual([{ date: monday, rank: 1 }]);
+        expect(atp[0].date).not.toBe('2026-09-22');
+        expect(env.puts.filter(k => k.startsWith('tw:rank-history:')).sort()).toEqual([
+            'tw:rank-history:v1:ATP:47275',
+            'tw:rank-history:v1:WTA:12345',
+        ]);
+
+        env.puts.length = 0;
+        await handleScheduled(env, { scheduledTime: thursdayNoon });
+        expect(env.puts.filter(k => k.startsWith('tw:rank-history:'))).toEqual([]);
+        expect(JSON.parse(env.store.get('tw:rank-history:v1:ATP:47275'))).toEqual(atp);
+
+        env.puts.length = 0;
+        await seedRankSnapshots(env, 'ATP', [
+            { playerKey: '999', rank: 3 },
+            { playerKey: '998', rank: 4, rankingDate: '' },
+            { playerKey: '997', rank: 5, date: 'not-a-date' },
+        ]);
+        expect(env.puts.filter(k => k.startsWith('tw:rank-history:'))).toEqual([]);
+        expect(env.store.has('tw:rank-history:v1:ATP:999')).toBe(false);
         expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 });
