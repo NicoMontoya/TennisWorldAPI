@@ -1,5 +1,6 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
+import { calendarYearFor } from '../calendarYear.js';
 
 // GET /api/player-history?tour=ATP|WTA&playerKey=47275
 //
@@ -37,7 +38,7 @@ async function getTournamentMap(env, tour) {
     const years = [year, year - 1, year - 2, year - 3, year - 4];
 
     const results = await Promise.allSettled(
-        years.map(y => rapidAPI.calendar(env, tour, y))
+        years.map(y => calendarYearFor(env, tour, y))
     );
 
     const map = {};

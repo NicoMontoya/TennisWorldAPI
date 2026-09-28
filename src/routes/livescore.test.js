@@ -245,7 +245,7 @@ describe('GET /api/livescore MatchStat live-first', () => {
         expect(data.find(m => m.isLive).tournamentKey).toBe('20340');
     });
 
-    it('uses 30s TTL on match-day fixtures-only so new InPlay is not trapped for 120s', async () => {
+    it('uses 60s TTL on match-day fixtures-only so new InPlay is not trapped for 120s', async () => {
         const setSpy = vi.spyOn(cache, 'set');
         const edgeSpy = vi.spyOn(cache, 'setEdge');
         installFetch({ liveEvents: [] });
