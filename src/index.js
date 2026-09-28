@@ -19,6 +19,7 @@ import { handlePlayerHistory }     from './routes/playerHistory.js';
 import { handleVintageRoster, handlePlayerVintage, handleImportVintage } from './routes/vintage.js';
 import { handleVintageRankByAge, handleImportVintageRankByAge } from './routes/vintageRankByAge.js';
 import { handlePlayerRankHistory, seedRankSnapshots } from './routes/playerRankHistory.js';
+import { getCalendarYear } from './calendarYear.js';
 import { handleBackfillRankings, handleClearRankHistory, handleImportRankHistory, handleImportMatches } from './routes/adminBackfill.js';
 import { handleImportOfficialDraw } from './routes/officialDrawAdmin.js';
 import { handleRankingsHistory, handleImportRankingsHistory } from './routes/rankingsHistory.js';
@@ -105,35 +106,46 @@ function corsHeaders(env, request) {
 }
 
 // ── Cron: background KV cache refresh ────────────────────────────────────────
-// Triggered every 6h by wrangler.toml [[triggers.crons]].
-// Warms the two slowest / least-volatile endpoints so the first user of the day
-// always gets a fast cached response instead of a cold upstream fetch.
-async function handleScheduled(env) {
+// Triggered every 6h by wrangler.toml [[triggers.crons]] (`0 */6 * * *`).
+// Standings stay warm on every run. Rank snapshots are one KV write per
+// player per day, so they run only when the scheduled UTC hour is 12.
+// The calendar warm used to call /api/calendar with a date window nobody
+// else requests; it now fills getCalendarYear for the current year.
+export const RANK_SEED_UTC_HOUR = 12;
+
+function scheduledInstant(event) {
+    const raw = event && typeof event === 'object' && 'scheduledTime' in event
+        ? event.scheduledTime
+        : event;
+    if (raw instanceof Date) return new Date(raw.getTime());
+    if (typeof raw === 'number' && Number.isFinite(raw)) return new Date(raw);
+    return new Date();
+}
+
+export async function handleScheduled(env, event) {
     const TOURS = ['ATP', 'WTA'];
     const results = [];
+    const when = scheduledInstant(event);
+    const seedRanks = when.getUTCHours() === RANK_SEED_UTC_HOUR;
 
     for (const tour of TOURS) {
-        // Standings + seed rank snapshots for top-50
+        // Standings every run. Rank snapshots only at RANK_SEED_UTC_HOUR.
         try {
             const req  = new Request(`https://placeholder/api/standings?tour=${tour}`);
             const data = await handleStandings(req, env);
             results.push(`standings:${tour}:ok`);
-            if (Array.isArray(data)) {
+            if (seedRanks && Array.isArray(data)) {
                 await seedRankSnapshots(env, tour, data.slice(0, 50));
                 results.push(`rank-seed:${tour}:ok`);
+            } else if (Array.isArray(data)) {
+                results.push(`rank-seed:${tour}:skip`);
             }
         } catch (e) {
             results.push(`standings:${tour}:err:${e.message}`);
         }
 
-        // Calendar (current month ±7 days)
         try {
-            const today = new Date();
-            const start = new Date(today); start.setDate(today.getDate() - 7);
-            const stop  = new Date(today); stop.setDate(today.getDate() + 30);
-            const fmt   = d => d.toISOString().split('T')[0];
-            const req   = new Request(`https://placeholder/api/calendar?tour=${tour}&dateStart=${fmt(start)}&dateStop=${fmt(stop)}`);
-            await handleCalendar(req, env);
+            await getCalendarYear(env, tour, when.getFullYear(), when);
             results.push(`calendar:${tour}:ok`);
         } catch (e) {
             results.push(`calendar:${tour}:err:${e.message}`);
@@ -145,8 +157,8 @@ async function handleScheduled(env) {
 
 // ── Main fetch handler ────────────────────────────────────────────────────────
 export default {
-    async scheduled(_event, env) {
-        await handleScheduled(env);
+    async scheduled(event, env) {
+        await handleScheduled(env, event);
     },
 
     async fetch(request, env) {

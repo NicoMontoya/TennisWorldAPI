@@ -86,6 +86,19 @@ export function drawOrderFields(rounds) {
     return fields;
 }
 
+// standings2 is the same entry /api/standings reads. Rows are
+// { playerKey, rank }. rankingsPaged rows are { player: { id }, position }.
+async function loadRankMap(env, tour) {
+    const cached = await cache.get(env, 'standings2', tour);
+    const rows = Array.isArray(cached?.data) ? cached.data : [];
+    if (rows.length) {
+        return new Map(rows.map(r => [Number(r.playerKey), r.rank]));
+    }
+    const rankData = await rapidAPI.rankingsPaged(env, tour);
+    const rankList = rankData?.data || [];
+    return new Map(rankList.map(r => [r.player?.id, r.position]));
+}
+
 // GET /api/draws?tournamentKey=XXXX&tour=ATP|WTA
 // tournamentKey is the new RapidAPI tournament id. Query `season` is ignored.
 // The official-draw record is the year on the match dates, not the query.
@@ -166,13 +179,12 @@ export async function handleDraws(request, env) {
         ...upcomingMatches.map(m  => transformMatch(m, false)),
     ];
 
-    // ── Enrich with live rankings for unseeded players ────────────────────────
-    // Paged (~2000 deep): the top-100/201 list left draw qualifiers (e.g. rank 248)
-    // with no rank number; paging covers the whole draw.
+    // ── Enrich with ranks for unseeded players ────────────────────────────────
+    // Prefer the standings cache (/api/standings, key standings2) so a draw
+    // miss does not page rankings (up to 10 RapidAPI calls). Fall back to
+    // rankingsPaged only when that cache is empty.
     try {
-        const rankData = await rapidAPI.rankingsPaged(env, tour);
-        const rankList = rankData?.data || [];
-        const rankMap  = new Map(rankList.map(r => [r.player?.id, r.position]));
+        const rankMap = await loadRankMap(env, tour);
         for (const f of transformed) {
             if (!f.player1Rank) f.player1Rank = rankMap.get(Number(f.player1Key)) || null;
             if (!f.player2Rank) f.player2Rank = rankMap.get(Number(f.player2Key)) || null;
@@ -224,7 +236,7 @@ export async function handleDraws(request, env) {
                                      && r.matches.some(m => m.winner));
 
     let ttl;
-    if (anyLive)                 ttl = TTL.drawsLive;   //   5 min — in-play draw; ticker uses TTL.livescore (30s)
+    if (anyLive)                 ttl = TTL.drawsLive;   //   5 min — in-play draw; ticker uses TTL.livescore (60s)
     else if (anyDecided && !finalDone) ttl = 10 * 60;  //  10 min — tournament in progress
     else if (!anyDecided)        ttl = 60 * 60;         //   1 hr  — not started (draw/qualifiers settling)
     else                         ttl = TTL.fixtures;    //  24 hr  — completed, nothing left to change

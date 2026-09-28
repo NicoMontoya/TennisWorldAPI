@@ -1,6 +1,7 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
+import { calendarYearFor } from '../calendarYear.js';
 import { readMatchLog, mergeMatches } from './playerMatches.js';
 
 // Ordered-pair Cache API/KV namespace. Bump when H2H computation or match-log
@@ -54,7 +55,7 @@ async function getTournamentMap(env, tour) {
     const years = [year, year - 1, year - 2, year - 3, year - 4];
 
     const results = await Promise.allSettled(
-        years.map(y => rapidAPI.calendar(env, tour, y))
+        years.map(y => calendarYearFor(env, tour, y))
     );
 
     const map = {};

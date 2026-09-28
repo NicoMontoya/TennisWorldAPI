@@ -1,6 +1,7 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
+import { getCalendarYear } from '../calendarYear.js';
 import { parseTour, parseTournamentKey, rateLimit } from '../security.js';
 import {
     ROUND_NAME,
@@ -116,7 +117,7 @@ function mapResultRow(r, { tid, tournamentName, seedMap, todayStr, tour }) {
 async function loadCalendar(env, tour, now) {
     const year = now.getFullYear();
     const years = now.getMonth() === 0 ? [year - 1, year] : [year];
-    const pages = await Promise.all(years.map(y => rapidAPI.calendar(env, tour, y)));
+    const pages = await Promise.all(years.map(y => getCalendarYear(env, tour, y, now)));
     const items = [];
     for (const p of pages) items.push(...(p?.data || []));
     return items;
@@ -131,7 +132,7 @@ async function loadCalendar(env, tour, now) {
 // InPlay that vanishes from Extend stays Finished with last scores (sticky)
 // until Core results confirm. Past-start unplayed → Delayed, no invented scores.
 // Response is the existing fixtures-board shape (string[] setScores) plus
-// currentGame when InPlay. 30s TTL when InPlay or scheduled today;
+// currentGame when InPlay. 60s TTL when InPlay, scheduled, or delayed;
 // idle 2 min only when the board is finished-only / empty.
 // Payload is Cache API only (no KV put). Sticky-completion `:done` still
 // uses KV when the completed-match set changes.
@@ -262,7 +263,7 @@ export async function handleLivescore(request, env) {
     return data;
 }
 
-/** 30s while anything is live or still scheduled; 120s only when nothing can go InPlay. */
+/** 60s while anything is live, scheduled, or delayed; 120s only when nothing can go InPlay. */
 export function livescoreTtlFor(board) {
     const rows = Array.isArray(board) ? board : [];
     const watchForLive = rows.some(m =>

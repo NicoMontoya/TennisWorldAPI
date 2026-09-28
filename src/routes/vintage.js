@@ -1,5 +1,6 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
+import { calendarYearFor } from '../calendarYear.js';
 
 // GET /api/vintage-roster?tour=ATP|WTA        → { roster }
 // GET /api/player-vintage?tour=ATP|WTA&playerKey=47275 → { player, points, totals }
@@ -73,7 +74,7 @@ async function getTierMap(env, tour, years) {
         if (cached) { Object.assign(map, cached.data); continue; }
 
         let cal;
-        try { cal = await rapidAPI.calendar(env, tour, year); }
+        try { cal = await calendarYearFor(env, tour, year); }
         catch { continue; }   // one bad year must not sink the whole curve
 
         const yearMap = {};
