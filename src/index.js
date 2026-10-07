@@ -25,6 +25,7 @@ import { LIVESCORE_FETCHED_AT_UNKNOWN, normalizeFetchedAt, takeFetchedAt } from 
 import { handleBackfillRankings, handleClearRankHistory, handleImportRankHistory, handleImportMatches } from './routes/adminBackfill.js';
 import { handleImportOfficialDraw } from './routes/officialDrawAdmin.js';
 import { handleRankingsHistory, handleImportRankingsHistory } from './routes/rankingsHistory.js';
+import { handleSurfaceForm } from './routes/surfaceForm.js';
 import { handleRegister, handleLogin, handleLogout, handleMe, handleUpdateProfile, handleChangePassword } from './routes/auth.js';
 import { handleFavorites, handleFavoritesToggle }              from './routes/favorites.js';
 import { handlePredict }      from './routes/predict.js';
@@ -50,6 +51,7 @@ const GET_ROUTES = {
     '/api/vintage-rank-by-age':    handleVintageRankByAge,
     '/api/player-ranking-history':      handlePlayerRankHistory,
     '/api/rankings-history':            handleRankingsHistory,
+    '/api/rankings/surface-form':       handleSurfaceForm,
     '/api/admin/backfill-rankings':     handleBackfillRankings,
     '/api/admin/clear-rank-history':    handleClearRankHistory,
     '/api/auth/me':           handleMe,
