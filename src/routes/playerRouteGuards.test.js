@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import worker from '../index.js';
 import { cache } from '../cache.js';
+import { TTL } from '../config.js';
 import { RL_PER_MINUTE, rateLimitCacheUrl } from '../security.js';
 
 const YEAR = new Date().getFullYear();
@@ -344,7 +345,8 @@ describe('player-stats and player-history guards', () => {
         });
 
         const ttl = (key) => env.TENNIS_CACHE._puts.find(p => p.key === key)?.opts?.expirationTtl;
-        expect(ttl(`tw:player-past-matches-200:ATP:${SINNER}`)).toBe(6 * 60 * 60);
+        expect(TTL.playerPastMatches).toBe(24 * 60 * 60);
+        expect(ttl(`tw:player-past-matches-200:ATP:${SINNER}`)).toBe(TTL.playerPastMatches);
         expect(ttl(`tw:player-titles:ATP:${SINNER}`)).toBe(72 * 60 * 60);
         expect(ttl(`tw:player-profile:ATP:${SINNER}`)).toBe(30 * 24 * 60 * 60);
         expect(ttl('tw:tournament-map-v6:ATP')).toBe(24 * 60 * 60);
