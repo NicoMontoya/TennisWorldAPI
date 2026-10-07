@@ -37,7 +37,7 @@ DEMO_MODE    = "false"                   # Set to "true" to serve mock data (no 
 # Visitors then see cached/stale rankings, draws, and results; live scores
 # stay on the last edge entry; uncached pages come back empty or 500 with a
 # generic upstream error (no remaining count, reset, or stop flag).
-RAPIDAPI_HARD_STOP = "off"
+RAPIDAPI_HARD_STOP = "on"
 
 # ── Scheduled cron triggers ────────────────────────────────────────────────────
 # Rankings + calendar: refresh every 6 hours (data doesn't change often)
