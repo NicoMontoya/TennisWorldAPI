@@ -35,7 +35,7 @@ DEMO_MODE    = "false"                   # Set to "true" to serve mock data (no 
 #   force — stop RapidAPI calls immediately
 # Only those exact strings. A blank, typo, different case, or trailing space acts as on.
 # Visitors then see cached/stale rankings, draws, and results; live scores
-# stay on the last edge entry; uncached pages come back empty or 503 with a
+# stay on the last edge entry; uncached pages come back empty or 500 with a
 # generic upstream error (no remaining count, reset, or stop flag).
 RAPIDAPI_HARD_STOP = "off"
 

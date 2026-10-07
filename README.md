@@ -135,7 +135,7 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
   The miss streak also stops that location locally at 3 (edge only). Reset
   seconds clamp to 60s–31 days; a missing reset rechecks in 24h. With the stop on, visitors get cached or stale rankings, draws, and
   results; live scores stay frozen on the last edge payload; pages with nothing
-  cached return their usual empty body or a generic upstream 503. Responses
+  cached return their usual empty body or a generic upstream 500. Responses
   never include the remaining count, the reset, or whether the stop is on.
   `GET /api/livescore` always sends `X-Fetched-At`, an ISO 8601 UTC string.
   Other methods (HEAD, POST) are not this route and do not send the header.

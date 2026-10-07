@@ -57,7 +57,6 @@ export class QuotaStopError extends Error {
     constructor() {
         super('Upstream request failed');
         this.name = 'QuotaStopError';
-        this.status = 503;
     }
 }
 

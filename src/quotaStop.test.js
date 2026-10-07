@@ -201,12 +201,18 @@ describe('RapidAPI quota hard stop', () => {
         expect(first.data).toHaveLength(1);
         expect(calls).toHaveLength(1);
 
-        await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toBeInstanceOf(QuotaStopError);
-        await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toMatchObject({
+        let stopped;
+        try {
+            await rapidAPI.rankings(env, 'ATP', 5);
+        } catch (err) {
+            stopped = err;
+        }
+        expect(stopped).toBeInstanceOf(QuotaStopError);
+        expect(stopped).toMatchObject({
             name: 'QuotaStopError',
-            status: 503,
             message: 'Upstream request failed',
         });
+        expect(stopped.status).toBeUndefined();
         expect(calls).toHaveLength(1);
 
         const puts = flagPuts(env);
@@ -470,10 +476,17 @@ describe('RapidAPI quota hard stop', () => {
     it('force stops calls immediately', async () => {
         const env = mockEnv('force');
         const calls = rankingsFetch('5000', '3600');
-        await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toMatchObject({
-            status: 503,
+        let stopped;
+        try {
+            await rapidAPI.rankings(env, 'ATP', 5);
+        } catch (err) {
+            stopped = err;
+        }
+        expect(stopped).toMatchObject({
+            name: 'QuotaStopError',
             message: 'Upstream request failed',
         });
+        expect(stopped.status).toBeUndefined();
         expect(calls).toHaveLength(0);
         expect(flagPuts(env)).toHaveLength(0);
         expect(callTally()).toBe(0);
@@ -536,7 +549,7 @@ describe('RapidAPI quota hard stop', () => {
             }
             const body = JSON.parse(text);
             if (path.includes('/hub') || path.includes('/draws')) {
-                expect(res.status).toBe(503);
+                expect(res.status).toBe(500);
                 expect(body).toEqual({ ok: false, error: 'Upstream request failed' });
             } else {
                 expect(res.status).toBe(200);
