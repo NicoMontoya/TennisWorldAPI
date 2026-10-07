@@ -135,24 +135,44 @@ async function loadCalendar(env, tour, now) {
 // Response is the existing fixtures-board shape (string[] setScores) plus
 // currentGame when InPlay. 60s TTL when InPlay, scheduled, or delayed;
 // idle 2 min only when the board is finished-only / empty.
-// The live payload is edge-cached. The upstream fetch time is stored on that
-// edge entry and in this isolate's memory. It is never written to KV.
+// The live payload is edge-cached (short TTL) plus a 12h edge backup under
+// `last`. The board and its fetch time are also kept in this isolate.
+// Neither is written to KV. A hard stop serves that saved list. An empty
+// list is only for a board that was never saved.
 // Sticky-completion `:done` still uses KV when the completed-match set changes.
 const lastFetchAt = new Map();
+const lastBoard = new Map();
 
 function fetchMemoryKey(cacheKey) {
     return cacheKey.map(String).join(':');
 }
 
-function rememberFetchedAt(cacheKey, fetchedAt) {
+function cloneBoard(data) {
+    try {
+        const copy = JSON.parse(JSON.stringify(data));
+        return Array.isArray(copy) ? copy : null;
+    } catch {
+        return null;
+    }
+}
+
+function rememberBoard(cacheKey, data, fetchedAt) {
     const at = normalizeFetchedAt(fetchedAt);
     // The epoch means "unknown", not a successful upstream fetch.
     if (at === LIVESCORE_FETCHED_AT_UNKNOWN) return;
-    lastFetchAt.set(fetchMemoryKey(cacheKey), at);
+    const copy = cloneBoard(data);
+    if (!copy) return;
+    const key = fetchMemoryKey(cacheKey);
+    lastFetchAt.set(key, at);
+    lastBoard.set(key, { data: copy, fetchedAt: at });
 }
 
 function recallFetchedAt(cacheKey) {
     return lastFetchAt.get(fetchMemoryKey(cacheKey)) || null;
+}
+
+function recallBoard(cacheKey) {
+    return lastBoard.get(fetchMemoryKey(cacheKey)) || null;
 }
 
 // Last successful upstream time for this isolate, or null. Used when a
@@ -168,6 +188,7 @@ export function recallLivescoreFetchedAt(tour, tournamentKey) {
 
 export function resetLivescoreFetchMemoryForTests() {
     lastFetchAt.clear();
+    lastBoard.clear();
 }
 
 export async function handleLivescore(request, env) {
@@ -183,8 +204,8 @@ export async function handleLivescore(request, env) {
     try {
         cached = await cache.get(env, ...cacheKey);
     } catch {
-        // A KV read error must not 500 the ticker. Serve the empty board
-        // with this isolate's last fetch time, or the epoch.
+        // A KV read error must not 500 the ticker. Serve the last saved
+        // board, or the empty epoch board when nothing was saved.
         return serveLivescoreFallback(cacheKey);
     }
     if (cached && Array.isArray(cached.data)) {
@@ -192,9 +213,9 @@ export async function handleLivescore(request, env) {
         // upstream time. cachedAt is only a stand-in for entries written
         // before fetchedAt was stored.
         const at = normalizeFetchedAt(cached.fetchedAt || cached.cachedAt);
-        // This isolate can still answer after the edge entry expires, without
-        // a KV write. The time came from the edge payload.
-        rememberFetchedAt(cacheKey, at);
+        // This isolate can still answer after the short edge TTL, without a
+        // KV write. The list is the one stored with that fetch time.
+        rememberBoard(cacheKey, cached.data, at);
         return stampFetchedAt(cached.data, at);
     }
 
@@ -317,29 +338,37 @@ export async function handleLivescore(request, env) {
     await persistSeenLive(env, tour, seenKey, snapshot, prevSeen);
     data = data.map(stripStickyFlag);
 
-    // A successful upstream fill remembers its clock time on the edge entry
-    // (with the payload) and in this isolate. Failures do not invent a time
-    // and do not write KV.
-    if (fetchedAt) {
-        rememberFetchedAt(cacheKey, fetchedAt);
-        try {
-            await cache.setEdge(livescoreTtlFor(data), data, ...cacheKey, { fetchedAt });
-        } catch { /* edge put is already fail-soft */ }
-        return stampFetchedAt(data, fetchedAt);
-    }
-
-    return serveLivescoreFallback(cacheKey);
+    // A successful fill keeps the list on the short-lived primary edge entry,
+    // a 12h edge backup, and in this isolate. Nothing here is a KV write.
+    rememberBoard(cacheKey, data, fetchedAt);
+    try {
+        await cache.setEdge(livescoreTtlFor(data), data, ...cacheKey, { fetchedAt });
+    } catch { /* edge put is already fail-soft */ }
+    try {
+        await cache.setEdge(TTL.livescoreSeen, data, ...cacheKey, 'last', { fetchedAt });
+    } catch { /* backup is best-effort; isolate memory still has the list */ }
+    return stampFetchedAt(data, fetchedAt);
 }
 
-// No successful upstream response and no edge payload. The last fetch time
-// is this isolate's memory, or the epoch when this isolate never saw one.
+// No successful upstream response. Serve the last saved list. Do not write
+// an empty board onto the primary edge key — that would hide the saved
+// matches for the rest of a multi-hour stop.
 async function serveLivescoreFallback(cacheKey) {
-    const at = normalizeFetchedAt(recallFetchedAt(cacheKey) || LIVESCORE_FETCHED_AT_UNKNOWN);
-    const empty = [];
     try {
-        await cache.setEdge(TTL.livescoreIdle, empty, ...cacheKey, { fetchedAt: at });
-    } catch { /* header is still set on this response */ }
-    return stampFetchedAt(empty, at);
+        const backup = await cache.getEdge(...cacheKey, 'last');
+        if (backup && Array.isArray(backup.data)) {
+            const at = normalizeFetchedAt(backup.fetchedAt || backup.cachedAt);
+            rememberBoard(cacheKey, backup.data, at);
+            return stampFetchedAt(cloneBoard(backup.data) || backup.data, at);
+        }
+    } catch { /* try isolate memory */ }
+
+    const saved = recallBoard(cacheKey);
+    if (saved && Array.isArray(saved.data)) {
+        return stampFetchedAt(cloneBoard(saved.data) || saved.data, saved.fetchedAt);
+    }
+
+    return stampFetchedAt([], LIVESCORE_FETCHED_AT_UNKNOWN);
 }
 
 /** 60s while anything is live, scheduled, or delayed; 120s only when nothing can go InPlay. */

@@ -140,10 +140,11 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
   `GET /api/livescore` always sends `X-Fetched-At`, an ISO 8601 UTC string.
   Other methods (HEAD, POST) are not this route and do not send the header.
   A successful fill stores that Worker-clock time on the edge entry next to
-  the payload, and in this isolate's memory. It is not written to KV. Cache
-  hits, a hard stop, and an upstream error return that original time while
-  the edge entry or this isolate still has it. If neither does, the header
-  is `1970-01-01T00:00:00.000Z` (the UI treats it as stale). The JSON body is
+  the payload, a 12h edge backup of that list, and in this isolate's memory.
+  It is not written to KV. Cache hits, a hard stop, and an upstream error
+  return that saved list and its original time. The empty list and
+  `1970-01-01T00:00:00.000Z` are only used when no board was ever saved.
+  The JSON body is
   unchanged (`data` stays the match array). The Scores page polls this
   route, not `/api/hub`, so the hub response does not carry the header.
   A cross-origin livescore response also lists that name in

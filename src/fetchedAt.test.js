@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import worker from './index.js';
+import { cache } from './cache.js';
 import { LIVESCORE_FETCHED_AT_UNKNOWN } from './fetchedAt.js';
 import { resetLivescoreFetchMemoryForTests } from './routes/livescore.js';
 
@@ -16,6 +17,7 @@ const BOARD = [{
     setScores: ['1-0'],
 }];
 const EDGE_BOARD = 'https://tennisworld-cache.internal/tw:livescore3:ATP:all';
+const EDGE_LAST = 'https://tennisworld-cache.internal/tw:livescore3:ATP:all:last';
 const EDGE_SEEN = 'https://tennisworld-cache.internal/tw:livescore3:ATP:all:seen';
 
 function urlOf(req) {
@@ -274,20 +276,23 @@ describe('X-Fetched-At', () => {
         installUpstreamError();
         vi.setSystemTime(new Date(LATER));
 
+        const filledBody = await filled.json();
         const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
         const body = await res.json();
         expect(res.status).toBe(200);
         assertFetchedAt(res, FIRST);
-        expect(body.data).toEqual([]);
+        expect(body.data).toEqual(filledBody.data);
     });
 
-    it('uses the last successful fetch time from isolate memory when the board cache is gone', async () => {
+    it('uses the last saved list from isolate memory when the edge copies are gone', async () => {
         installUpstream();
         const env = mockEnv();
         const filled = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const filledBody = await filled.json();
         assertFetchedAt(filled, FIRST);
 
         globalThis.caches.default._store.delete(EDGE_BOARD);
+        globalThis.caches.default._store.delete(EDGE_LAST);
         env.RAPIDAPI_HARD_STOP = 'force';
         globalThis.fetch = vi.fn(() => { throw new Error('fetch must not be called'); });
         vi.setSystemTime(new Date(LATER));
@@ -296,7 +301,7 @@ describe('X-Fetched-At', () => {
         const body = await res.json();
         expect(res.status).toBe(200);
         assertFetchedAt(res, FIRST);
-        expect(body.data).toEqual([]);
+        expect(body.data).toEqual(filledBody.data);
         expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
@@ -320,10 +325,81 @@ describe('X-Fetched-At', () => {
         const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
         const body = await res.json();
         expect(res.status).toBe(200);
-        expect(body.data).toEqual([]);
+        expect(body.data).toEqual(filledBody.data);
+        expect(body.data.some(m => m.isLive)).toBe(true);
         expect(puts).toEqual([]);
         expect(env.TENNIS_CACHE._store.has('tw:livescore3:ATP:all:done')).toBe(false);
         expect(seenSnapshot()).toBe(seenBefore);
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('hard stop returns the last saved in-play list and its original fetch time', async () => {
+        installUpstream();
+        const env = mockEnv();
+        const puts = trackPuts(env);
+        const filled = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const filledBody = await filled.json();
+        expect(filledBody.data.some(m => m.isLive)).toBe(true);
+        assertFetchedAt(filled, FIRST);
+        puts.length = 0;
+
+        globalThis.caches.default._store.delete(EDGE_BOARD);
+        resetLivescoreFetchMemoryForTests();
+        env.RAPIDAPI_HARD_STOP = 'force';
+        globalThis.fetch = vi.fn(() => { throw new Error('fetch must not be called'); });
+        vi.setSystemTime(new Date(LATER));
+
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const body = await res.json();
+        expect(res.status).toBe(200);
+        expect(body.data).toEqual(filledBody.data);
+        expect(body.data.some(m => m.isLive)).toBe(true);
+        assertFetchedAt(res, FIRST);
+        expect(puts).toEqual([]);
+        expect(env.TENNIS_CACHE._store.has('tw:livescore3:ATP:all:done')).toBe(false);
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('returns the empty list and the epoch only when no board was ever saved', async () => {
+        globalThis.fetch = vi.fn(() => { throw new Error('fetch must not be called'); });
+        const env = mockEnv();
+        const puts = trackPuts(env);
+        env.RAPIDAPI_HARD_STOP = 'force';
+
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const body = await res.json();
+        expect(res.status).toBe(200);
+        expect(body.data).toEqual([]);
+        assertFetchedAt(res, LIVESCORE_FETCHED_AT_UNKNOWN);
+        expect(puts).toEqual([]);
+        expect(globalThis.caches.default._store.has(EDGE_BOARD)).toBe(false);
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('does not cache an empty board on the primary edge key during fallback', async () => {
+        installUpstream();
+        const env = mockEnv();
+        const filled = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const filledBody = await filled.json();
+        expect(filledBody.data.some(m => m.isLive)).toBe(true);
+
+        const edgeSpy = vi.spyOn(cache, 'setEdge');
+        globalThis.caches.default._store.delete(EDGE_BOARD);
+        resetLivescoreFetchMemoryForTests();
+        env.RAPIDAPI_HARD_STOP = 'force';
+        globalThis.fetch = vi.fn(() => { throw new Error('fetch must not be called'); });
+
+        const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const body = await res.json();
+        expect(body.data).toEqual(filledBody.data);
+        expect(globalThis.caches.default._store.has(EDGE_BOARD)).toBe(false);
+        expect(globalThis.caches.default._store.has(EDGE_LAST)).toBe(true);
+        const emptyPrimary = edgeSpy.mock.calls.filter(call => {
+            const data = call[1];
+            const parts = call.slice(2).filter(part => !(part && typeof part === 'object' && 'fetchedAt' in part));
+            return Array.isArray(data) && data.length === 0 && parts.join(':') === 'livescore3:ATP:all';
+        });
+        expect(emptyPrimary).toEqual([]);
         expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
@@ -345,7 +421,8 @@ describe('X-Fetched-At', () => {
         const res = await worker.fetch(get('/api/livescore?tour=ATP'), env);
         const body = await res.json();
         expect(res.status).toBe(200);
-        expect(body.data).toEqual([]);
+        expect(body.data).toEqual(filledBody.data);
+        expect(body.data.some(m => m.isLive)).toBe(true);
         expect(puts).toEqual([]);
         expect(env.TENNIS_CACHE._store.has('tw:livescore3:ATP:all:done')).toBe(false);
         expect(seenSnapshot()).toBe(seenBefore);
@@ -356,6 +433,7 @@ describe('X-Fetched-At', () => {
         installUpstream();
         const env = mockEnv();
         const filled = await worker.fetch(get('/api/livescore?tour=ATP'), env);
+        const filledBody = await filled.json();
         assertFetchedAt(filled, FIRST);
 
         globalThis.caches.default._store.delete(EDGE_BOARD);
@@ -366,7 +444,7 @@ describe('X-Fetched-At', () => {
         const body = await res.json();
         expect(res.status).toBe(200);
         assertFetchedAt(res, FIRST);
-        expect(body.data).toEqual([]);
+        expect(body.data).toEqual(filledBody.data);
         expect(body.ok).toBe(true);
     });
 
