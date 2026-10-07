@@ -10,6 +10,11 @@ TENNIS_API_KEY=your-api-tennis-com-key-here
 # Set to "true" to run leftover api-tennis routes without that key (mock data)
 DEMO_MODE=false
 
+# RapidAPI hard stop. Also set in wrangler.toml [vars] (ships as off).
+# Exact values only: off = never, on = stop when the quota is exhausted, force = stop now.
+# Unset defaults to off. Any other present value (blank, typo, "ON ") acts as on.
+# RAPIDAPI_HARD_STOP=off
+
 # Protects POST /api/admin/import-* (Sackmann backfills). Production: wrangler secret put ADMIN_SECRET
 ADMIN_SECRET=change-me-local-admin-secret
 

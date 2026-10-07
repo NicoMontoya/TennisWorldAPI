@@ -1,6 +1,8 @@
 import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
+import { getCalendarYear } from '../calendarYear.js';
+import { LIVESCORE_FETCHED_AT_UNKNOWN, normalizeFetchedAt, stampFetchedAt } from '../fetchedAt.js';
 import { parseTour, parseTournamentKey, rateLimit } from '../security.js';
 import {
     ROUND_NAME,
@@ -116,7 +118,7 @@ function mapResultRow(r, { tid, tournamentName, seedMap, todayStr, tour }) {
 async function loadCalendar(env, tour, now) {
     const year = now.getFullYear();
     const years = now.getMonth() === 0 ? [year - 1, year] : [year];
-    const pages = await Promise.all(years.map(y => rapidAPI.calendar(env, tour, y)));
+    const pages = await Promise.all(years.map(y => getCalendarYear(env, tour, y, now)));
     const items = [];
     for (const p of pages) items.push(...(p?.data || []));
     return items;
@@ -131,10 +133,64 @@ async function loadCalendar(env, tour, now) {
 // InPlay that vanishes from Extend stays Finished with last scores (sticky)
 // until Core results confirm. Past-start unplayed → Delayed, no invented scores.
 // Response is the existing fixtures-board shape (string[] setScores) plus
-// currentGame when InPlay. 30s TTL when InPlay or scheduled today;
+// currentGame when InPlay. 60s TTL when InPlay, scheduled, or delayed;
 // idle 2 min only when the board is finished-only / empty.
-// Payload is Cache API only (no KV put). Sticky-completion `:done` still
-// uses KV when the completed-match set changes.
+// The live payload is edge-cached (short TTL) plus a 12h edge backup under
+// `last`. The board and its fetch time are also kept in this isolate.
+// Neither is written to KV. A hard stop serves that saved list. An empty
+// list is only for a board that was never saved.
+// Sticky-completion `:done` still uses KV when the completed-match set changes.
+const lastFetchAt = new Map();
+const lastBoard = new Map();
+
+function fetchMemoryKey(cacheKey) {
+    return cacheKey.map(String).join(':');
+}
+
+function cloneBoard(data) {
+    try {
+        const copy = JSON.parse(JSON.stringify(data));
+        return Array.isArray(copy) ? copy : null;
+    } catch {
+        return null;
+    }
+}
+
+function rememberBoard(cacheKey, data, fetchedAt) {
+    const at = normalizeFetchedAt(fetchedAt);
+    // The epoch means "unknown", not a successful upstream fetch.
+    if (at === LIVESCORE_FETCHED_AT_UNKNOWN) return;
+    const copy = cloneBoard(data);
+    if (!copy) return;
+    const key = fetchMemoryKey(cacheKey);
+    lastFetchAt.set(key, at);
+    lastBoard.set(key, { data: copy, fetchedAt: at });
+}
+
+function recallFetchedAt(cacheKey) {
+    return lastFetchAt.get(fetchMemoryKey(cacheKey)) || null;
+}
+
+function recallBoard(cacheKey) {
+    return lastBoard.get(fetchMemoryKey(cacheKey)) || null;
+}
+
+// Last successful upstream time for this isolate, or null. Used when a
+// livescore request throws after a previous fill, so the error response
+// still carries that time instead of the epoch.
+export function recallLivescoreFetchedAt(tour, tournamentKey) {
+    const normalizedTour = String(tour || 'ATP').trim().toUpperCase() || 'ATP';
+    const tk = tournamentKey == null || String(tournamentKey).trim() === ''
+        ? 'all'
+        : String(tournamentKey).trim();
+    return recallFetchedAt(['livescore3', normalizedTour, tk]);
+}
+
+export function resetLivescoreFetchMemoryForTests() {
+    lastFetchAt.clear();
+    lastBoard.clear();
+}
+
 export async function handleLivescore(request, env) {
     await rateLimit(env, request, 'livescore');
 
@@ -144,15 +200,38 @@ export async function handleLivescore(request, env) {
 
     const cacheKey = ['livescore3', tour, tournamentKey || 'all'];
 
-    const cached = await cache.get(env, ...cacheKey);
-    if (cached) return cached.data;
+    let cached = null;
+    try {
+        cached = await cache.get(env, ...cacheKey);
+    } catch {
+        // A KV read error must not 500 the ticker. Serve the last saved
+        // board, or the empty epoch board when nothing was saved.
+        return serveLivescoreFallback(cacheKey);
+    }
+    if (cached && Array.isArray(cached.data)) {
+        // Edge hit (and a KV primary, if one exists) keeps the original
+        // upstream time. cachedAt is only a stand-in for entries written
+        // before fetchedAt was stored.
+        const at = normalizeFetchedAt(cached.fetchedAt || cached.cachedAt);
+        // This isolate can still answer after the short edge TTL, without a
+        // KV write. The list is the one stored with that fetch time.
+        rememberBoard(cacheKey, cached.data, at);
+        return stampFetchedAt(cached.data, at);
+    }
 
     const now      = new Date();
     const todayStr = now.toISOString().split('T')[0];
+    // Worker clock at the first successful upstream response in this fill.
+    let fetchedAt = null;
+    const markFetched = () => {
+        if (!fetchedAt) fetchedAt = new Date().toISOString();
+    };
 
     let liveRaw = [];
     try {
         liveRaw = await rapidAPI.liveEvents(env);
+        // Missing key returns [] without a paid call. A hard stop throws.
+        if (env?.RAPIDAPI_KEY) markFetched();
     } catch {
         liveRaw = [];
     }
@@ -194,9 +273,15 @@ export async function handleLivescore(request, env) {
             rapidAPI.tournamentFixtures(env, tour, tid),
             rapidAPI.tournamentResults(env, tour, tid),
         ]);
+        if (fx.status === 'fulfilled' || rs.status === 'fulfilled') markFetched();
         fixturesByTid.set(tid, fx.status === 'fulfilled' ? (fx.value?.data || []) : []);
         resultsByTid.set(tid, rs.status === 'fulfilled' ? (rs.value?.data?.singles || []) : []);
     }));
+
+    // No successful upstream response. Skip seen/sticky: empty live rows
+    // would mark every previously in-play match Finished, write
+    // tw:livescore3:…:done, and overwrite the 12h seen snapshot.
+    if (!fetchedAt) return serveLivescoreFallback(cacheKey);
 
     const coreIndex = indexCoreMatches(fixturesByTid, resultsByTid);
     const liveRows = liveFiltered
@@ -253,16 +338,40 @@ export async function handleLivescore(request, env) {
     await persistSeenLive(env, tour, seenKey, snapshot, prevSeen);
     data = data.map(stripStickyFlag);
 
-    // Match-day fixtures-only boards must not use the 120s idle TTL — a new
-    // InPlay mid-window would stay hidden until expiry (Scores flicker).
-    // Payload is Cache API only — no KV put (Free-tier write budget).
+    // A successful fill keeps the list on the short-lived primary edge entry,
+    // a 12h edge backup, and in this isolate. Nothing here is a KV write.
+    rememberBoard(cacheKey, data, fetchedAt);
     try {
-        await cache.setEdge(livescoreTtlFor(data), data, ...cacheKey);
+        await cache.setEdge(livescoreTtlFor(data), data, ...cacheKey, { fetchedAt });
     } catch { /* edge put is already fail-soft */ }
-    return data;
+    try {
+        await cache.setEdge(TTL.livescoreSeen, data, ...cacheKey, 'last', { fetchedAt });
+    } catch { /* backup is best-effort; isolate memory still has the list */ }
+    return stampFetchedAt(data, fetchedAt);
 }
 
-/** 30s while anything is live or still scheduled; 120s only when nothing can go InPlay. */
+// No successful upstream response. Serve the last saved list. Do not write
+// an empty board onto the primary edge key — that would hide the saved
+// matches for the rest of a multi-hour stop.
+async function serveLivescoreFallback(cacheKey) {
+    try {
+        const backup = await cache.getEdge(...cacheKey, 'last');
+        if (backup && Array.isArray(backup.data)) {
+            const at = normalizeFetchedAt(backup.fetchedAt || backup.cachedAt);
+            rememberBoard(cacheKey, backup.data, at);
+            return stampFetchedAt(cloneBoard(backup.data) || backup.data, at);
+        }
+    } catch { /* try isolate memory */ }
+
+    const saved = recallBoard(cacheKey);
+    if (saved && Array.isArray(saved.data)) {
+        return stampFetchedAt(cloneBoard(saved.data) || saved.data, saved.fetchedAt);
+    }
+
+    return stampFetchedAt([], LIVESCORE_FETCHED_AT_UNKNOWN);
+}
+
+/** 60s while anything is live, scheduled, or delayed; 120s only when nothing can go InPlay. */
 export function livescoreTtlFor(board) {
     const rows = Array.isArray(board) ? board : [];
     const watchForLive = rows.some(m =>

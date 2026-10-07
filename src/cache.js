@@ -3,7 +3,7 @@
 // ===================================
 // Layer 1 — Cloudflare Cache API (edge, very fast, ~free)
 //   Bypassed in local wrangler dev (Cache API unavailable) — silent fail.
-//   Hub/livescore *payloads* live here only (setEdge) so they do not burn
+//   Hub and livescore payloads live here (setEdge) so they do not burn
 //   Free-tier KV writes. Rate-limit counters are also Cache API (security.js).
 //
 // Layer 2 — Workers KV (persistent, global, survives restarts)
@@ -24,6 +24,15 @@ function buildKey(...parts) {
 }
 
 /** Optional last arg to cache.set: { skipStale?: boolean } */
+function takeFetchedAtOption(keyParts) {
+    if (!keyParts.length) return { parts: keyParts, fetchedAt: undefined };
+    const last = keyParts[keyParts.length - 1];
+    if (last && typeof last === 'object' && !Array.isArray(last) && 'fetchedAt' in last) {
+        return { parts: keyParts.slice(0, -1), fetchedAt: last.fetchedAt };
+    }
+    return { parts: keyParts, fetchedAt: undefined };
+}
+
 function takeSetOptions(keyParts) {
     if (!keyParts.length) return { parts: keyParts, opts: {} };
     const last = keyParts[keyParts.length - 1];
@@ -88,9 +97,15 @@ export const cache = {
      * Free-tier KV writes.
      */
     async setEdge(ttlSeconds, value, ...keyParts) {
+        const { parts, fetchedAt } = takeFetchedAtOption(keyParts);
+        keyParts = parts;
         const key = buildKey(...keyParts);
         const cachedAt = new Date().toISOString();
-        await edgePut(key, { data: value, cachedAt, stale: false }, ttlSeconds);
+        const envelope = { data: value, cachedAt, stale: false };
+        // Original upstream fetch time. Cache hits read this back; it is not
+        // the time the entry is served.
+        if (typeof fetchedAt === 'string' && fetchedAt) envelope.fetchedAt = fetchedAt;
+        await edgePut(key, envelope, ttlSeconds);
     },
 
     /**

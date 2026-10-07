@@ -151,7 +151,7 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         vi.restoreAllMocks();
     });
 
-    it('caches live livescore at TTL.livescore (30s) via Cache API only (no KV payload put)', async () => {
+    it('caches live livescore at TTL.livescore (60s) via Cache API only (no KV payload put)', async () => {
         const setSpy = vi.spyOn(cache, 'set');
         const edgeSpy = vi.spyOn(cache, 'setEdge');
         const data = await handleLivescore(get('/api/livescore?tour=ATP'), env);
@@ -163,6 +163,7 @@ describe('hub/livescore cache freshness + fail-soft', () => {
             'livescore3',
             'ATP',
             'all',
+            expect.objectContaining({ fetchedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) }),
         );
         expect(setSpy).not.toHaveBeenCalledWith(
             env,
@@ -175,7 +176,10 @@ describe('hub/livescore cache freshness + fail-soft', () => {
         );
         const kvKeys = [...env.TENNIS_CACHE._store.keys()];
         expect(kvKeys).not.toContain('tw:livescore3:ATP:all');
-        expect(kvKeys.some(k => k.endsWith(':stale'))).toBe(false);
+        expect(kvKeys.filter(k => k.includes('livescore'))).toEqual([]);
+        expect(kvKeys.filter(k => k.endsWith(':stale')).every(k =>
+            k.startsWith('tw:calendar-year:'),
+        )).toBe(true);
         expect(kvKeys.filter(k => k.startsWith('_rl:'))).toEqual([]);
         expect(caches.default._store.has('https://tennisworld-cache.internal/tw:livescore3:ATP:all')).toBe(true);
     });

@@ -29,6 +29,15 @@ id      = "71f4016e2aa14b9c8bba916d05086fe1"
 [vars]
 CORS_ORIGIN  = "https://tennisworld-api.nicomontoya.workers.dev"  # prod origin; dev overridden via .dev.vars + localhost reflection
 DEMO_MODE    = "false"                   # Set to "true" to serve mock data (no API key needed)
+# Paid RapidAPI hard stop. Not toggleable from a route.
+#   off   — never stop. Default ONLY when this var is unset.
+#   on    — stop new RapidAPI calls once the monthly quota is exhausted
+#   force — stop RapidAPI calls immediately
+# Only those exact strings. A blank, typo, different case, or trailing space acts as on.
+# Visitors then see cached/stale rankings, draws, and results; live scores
+# stay on the last edge entry; uncached pages come back empty or 500 with a
+# generic upstream error (no remaining count, reset, or stop flag).
+RAPIDAPI_HARD_STOP = "off"
 
 # ── Scheduled cron triggers ────────────────────────────────────────────────────
 # Rankings + calendar: refresh every 6 hours (data doesn't change often)

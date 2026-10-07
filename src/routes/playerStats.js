@@ -1,5 +1,7 @@
 import { cache } from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
+import { TTL }      from '../config.js';
+import { calendarYearFor } from '../calendarYear.js';
 import { parseTour, rateLimit } from '../security.js';
 
 // GET /api/player-stats?tour=ATP|WTA&playerKey=47275
@@ -9,9 +11,9 @@ import { parseTour, rateLimit } from '../security.js';
 // birthday comes from the player profile — the standings list omits it, so the
 // rankings page enriches its Age column from here.
 //
-// Caching (unchanged TTLs, only after the player exists):
+// Caching (only after the player exists):
 //   titles         → 72h  (changes only after a title win; 0 is cached for a real player)
-//   past-matches   → 6h   (updates after each match; never an empty list)
+//   past-matches   → 24h  (TTL.playerPastMatches; was 6h; never an empty list)
 //   tournament-map → 24h  (shared cache key with h2h.js)
 //   profile        → 30d  (birthday never changes)
 // A lookup with no past matches, or a thrown upstream error, is an edge-only
@@ -21,7 +23,7 @@ import { parseTour, rateLimit } from '../security.js';
 // playerKey is 1–10 digits. Rate limit bucket: player-stats (fail closed).
 
 const TTL_TITLES   = 72 * 60 * 60;
-const TTL_MATCHES  =  6 * 60 * 60;
+const TTL_MATCHES  = TTL.playerPastMatches;
 const TTL_CALENDAR = 24 * 60 * 60;
 const TTL_PROFILE  = 30 * 24 * 60 * 60;
 const TTL_MISS     = 10 * 60;
@@ -83,12 +85,20 @@ async function getTournamentMap(env, tour) {
     const cached = await cache.get(env, ...ckey);
     if (cached) return cached.data;
 
+    const missed = await cache.getEdge('tournament-map-miss', tour);
+    if (missed?.data?.miss) return {};
+
     const year  = new Date().getFullYear();
     const years = [year, year - 1, year - 2, year - 3, year - 4];
 
     const results = await Promise.allSettled(
-        years.map(y => rapidAPI.calendar(env, tour, y))
+        years.map(y => calendarYearFor(env, tour, y))
     );
+
+    if (!results.some(r => r.status === 'fulfilled')) {
+        await cache.setEdge(TTL.edgeMiss, { miss: true }, 'tournament-map-miss', tour);
+        return {};
+    }
 
     const map = {};
     for (const res of results) {
@@ -152,18 +162,24 @@ export async function handlePlayerStats(request, env) {
     const titlesCacheKey = ['player-titles', tour, playerKey];
     let titles = 0;
 
-    const cachedTitles = await cache.get(env, ...titlesCacheKey);
-    if (cachedTitles) {
-        titles = cachedTitles.data;
+    const titlesMiss = await cache.getEdge('player-titles-miss', tour, playerKey);
+    if (titlesMiss?.data?.miss) {
+        titles = 0;
     } else {
-        try {
-            const raw = await rapidAPI.playerTitles(env, tour, playerKey);
-            titles = (raw?.data || [])
-                .filter(t => (t.tourRankId ?? 99) >= MAIN_TOUR_RANK_ID)
-                .reduce((sum, t) => sum + (Number(t.titlesWon) || 0), 0);
-            await cache.set(env, TTL_TITLES, titles, ...titlesCacheKey);
-        } catch (e) {
-            console.error(`[player-stats] titles failed for ${tour}/${playerKey}:`, e.message);
+        const cachedTitles = await cache.get(env, ...titlesCacheKey);
+        if (cachedTitles) {
+            titles = cachedTitles.data;
+        } else {
+            try {
+                const raw = await rapidAPI.playerTitles(env, tour, playerKey);
+                titles = (raw?.data || [])
+                    .filter(t => (t.tourRankId ?? 99) >= MAIN_TOUR_RANK_ID)
+                    .reduce((sum, t) => sum + (Number(t.titlesWon) || 0), 0);
+                await cache.set(env, TTL_TITLES, titles, ...titlesCacheKey);
+            } catch (e) {
+                console.error(`[player-stats] titles failed for ${tour}/${playerKey}:`, e.message);
+                await cache.setEdge(TTL.edgeMiss, { miss: true }, 'player-titles-miss', tour, playerKey);
+            }
         }
     }
 
@@ -171,16 +187,23 @@ export async function handlePlayerStats(request, env) {
     const profileCacheKey = ['player-profile', tour, playerKey];
     let birthday = null;
 
-    const cachedProfile = await cache.get(env, ...profileCacheKey);
-    if (cachedProfile) {
-        birthday = cachedProfile.data;
+    const profileMiss = await cache.getEdge('player-profile-miss', tour, playerKey);
+    if (profileMiss?.data?.miss) {
+        birthday = null;
     } else {
-        try {
-            const raw = await rapidAPI.playerProfile(env, tour, playerKey);
-            birthday = raw?.data?.birthday || null;
-            if (birthday) await cache.set(env, TTL_PROFILE, birthday, ...profileCacheKey);
-        } catch (e) {
-            console.error(`[player-stats] profile failed for ${tour}/${playerKey}:`, e.message);
+        const cachedProfile = await cache.get(env, ...profileCacheKey);
+        if (cachedProfile) {
+            birthday = cachedProfile.data;
+        } else {
+            try {
+                const raw = await rapidAPI.playerProfile(env, tour, playerKey);
+                birthday = raw?.data?.birthday || null;
+                if (birthday) await cache.set(env, TTL_PROFILE, birthday, ...profileCacheKey);
+                else await cache.setEdge(TTL.edgeMiss, { miss: true }, 'player-profile-miss', tour, playerKey);
+            } catch (e) {
+                console.error(`[player-stats] profile failed for ${tour}/${playerKey}:`, e.message);
+                await cache.setEdge(TTL.edgeMiss, { miss: true }, 'player-profile-miss', tour, playerKey);
+            }
         }
     }
 

@@ -40,8 +40,8 @@ function kvEnv({ put } = {}) {
 }
 
 describe('TTL.livescore', () => {
-    it('is 30 seconds so live polls are not stuck behind a 5-minute floor', () => {
-        expect(TTL.livescore).toBe(30);
+    it('is 60 seconds so live polls are not stuck behind a 5-minute floor', () => {
+        expect(TTL.livescore).toBe(60);
         expect(TTL.livescore).toBeGreaterThanOrEqual(30);
         expect(TTL.livescore).toBeLessThanOrEqual(60);
         expect(TTL.livescoreIdle).toBe(120);
