@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { rapidAPI } from './apiClient.js';
+import { createMemoryD1 } from './d1Memory.js';
 import { handleLivescore } from './routes/livescore.js';
 import { handleHub } from './routes/hub.js';
 import { handleDraws } from './routes/draws.js';
@@ -10,7 +11,6 @@ import worker from './index.js';
 import {
     QUOTA_FLAG_KEY,
     QUOTA_HEADER_MISS_THRESHOLD,
-    QUOTA_CALL_TALLY_EDGE,
     QUOTA_RESET_DEFAULT_SEC,
     QUOTA_RESET_MAX_SEC,
     QUOTA_RESET_MIN_SEC,
@@ -29,6 +29,7 @@ function mockEnv(mode) {
     const env = {
         RAPIDAPI_KEY: DUMMY_KEY,
         CORS_ORIGIN: '*',
+        DB: createMemoryD1(),
         TENNIS_CACHE: {
             async get(key, type) {
                 const raw = store.get(key);
@@ -244,10 +245,12 @@ describe('RapidAPI quota hard stop', () => {
         assertLogsClean();
     });
 
-    function callTally() {
-        const entry = globalThis.caches.default._store.get(QUOTA_CALL_TALLY_EDGE);
-        if (!entry) return 0;
-        return Number(JSON.parse(entry.body).count) || 0;
+    function callTally(env) {
+        const day = new Date().toISOString().slice(0, 10);
+        const row = (env.DB?._tables?.call_tally || []).find(
+            item => item.provider === 'rapidapi' && item.utc_day === day,
+        );
+        return row ? row.count : 0;
     }
 
     it('a single header-less 5xx does not trip, and each 5xx increments the edge tally', async () => {
@@ -255,13 +258,13 @@ describe('RapidAPI quota hard stop', () => {
         const calls = installFetch(() => jsonRes({ error: true }, 500));
         await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toThrow('Upstream request failed');
         expect(flagPuts(env)).toHaveLength(0);
-        expect(callTally()).toBe(1);
+        expect(callTally(env)).toBe(1);
         expect([...env.TENNIS_CACHE._store.keys()].some(k => String(k).includes('call-tally') || String(k).includes('miss-streak'))).toBe(false);
 
         await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toThrow('Upstream request failed');
         expect(calls).toHaveLength(2);
         expect(flagPuts(env)).toHaveLength(0);
-        expect(callTally()).toBe(2);
+        expect(callTally(env)).toBe(2);
 
         const open = installFetch(() => jsonRes(
             { data: [{ position: 1, player: { id: 1, name: 'A' } }] },
@@ -316,7 +319,7 @@ describe('RapidAPI quota hard stop', () => {
 
         await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toBeInstanceOf(QuotaStopError);
         expect(calls).toHaveLength(1);
-        expect(callTally()).toBe(1);
+        expect(callTally(env)).toBe(1);
     });
 
     it('errors between header-less misses do not reset the streak', async () => {
@@ -336,7 +339,7 @@ describe('RapidAPI quota hard stop', () => {
         status = 500;
         await expect(rapidAPI.rankings(env, 'ATP', 5)).rejects.toThrow('Upstream request failed');
         expect(flagPuts(env)).toHaveLength(0);
-        expect(callTally()).toBe(3);
+        expect(callTally(env)).toBe(3);
 
         status = 200;
         await rapidAPI.rankings(env, 'ATP', 5);
@@ -489,7 +492,7 @@ describe('RapidAPI quota hard stop', () => {
         expect(stopped.status).toBeUndefined();
         expect(calls).toHaveLength(0);
         expect(flagPuts(env)).toHaveLength(0);
-        expect(callTally()).toBe(0);
+        expect(callTally(env)).toBe(0);
         expect(logs.join('\n')).toMatch(/\[quota\] hard stop active/);
         assertLogsClean();
     });
@@ -548,9 +551,16 @@ describe('RapidAPI quota hard stop', () => {
                 expect(`${k}: ${v}`).not.toMatch(LEAK);
             }
             const body = JSON.parse(text);
-            if (path.includes('/hub') || path.includes('/draws')) {
+            if (path.includes('/hub')) {
                 expect(res.status).toBe(500);
                 expect(body).toEqual({ ok: false, error: 'Upstream request failed' });
+            } else if (path.includes('/draws')) {
+                // Nothing stored: empty draw, not a 500 and not a quota detail.
+                expect(res.status).toBe(200);
+                expect(body).toEqual({
+                    ok: true,
+                    data: { tournamentKey: '20340', name: '', totalMatches: 0, rounds: [] },
+                });
             } else {
                 expect(res.status).toBe(200);
                 expect(body.ok).toBe(true);

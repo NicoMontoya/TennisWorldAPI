@@ -8,7 +8,8 @@
 // every call returns mock data from src/mocks/ instead of hitting the network.
 // This lets the site run fully offline for development or demos.
 //
-// Resilience: automatic retry with exponential backoff (3 attempts by default).
+// Resilience: network and non-429 HTTP errors retry with backoff. A 429 trips
+// the API-Tennis hard stop and is not retried.
 // Scores live uses MatchStat Extend `/extend/api/events/live` with the existing
 // Worker secret RAPIDAPI_KEY (same key/host as Core). TENNIS_API_KEY is not
 // used on the livescore path. Upstream errors are generic — never json.message
@@ -21,7 +22,23 @@
 
 import { getMock } from './mocks/index.js';
 import { unwrapLiveEvents } from './transforms/matchstatLive.js';
-import { isHardStopActive, isQuotaStop, noteRapidQuota, noteUpstreamCall, QuotaStopError } from './quotaStop.js';
+import {
+    isHardStopActive,
+    isQuotaStop,
+    noteRapidQuota,
+    noteUpstreamCall,
+    hardStopMode,
+    rapidDailyCallCap,
+    QuotaStopError,
+} from './quotaStop.js';
+import { claimCallSlot } from './callTally.js';
+import {
+    isApiTennisStopActive,
+    tripApiTennisOn429,
+    apiTennisHardStopMode,
+    apiTennisDailyCap,
+    apiTennisStopped,
+} from './apiTennisStop.js';
 
 const BASE         = 'https://api.api-tennis.com/tennis/';
 const MAX_RETRIES  = 3;
@@ -67,25 +84,37 @@ function sleep(ms) {
 
 // ── Core fetch with retry ──────────────────────────────────────────────────────
 
-async function fetchWithRetry(urlStr, attempt = 1) {
+// urlStr contains TENNIS_API_KEY. Never put it on an Error or a log line.
+async function fetchWithRetry(urlStr, env, attempt = 1) {
+    // Count this attempt before fetch. A thrown counter read/write must not
+    // reach the network. QuotaStopError is not retried.
+    if (apiTennisHardStopMode(env) === 'on') {
+        await claimCallSlot(env, 'api-tennis', apiTennisDailyCap(env));
+    }
+    let res;
     try {
-        const res = await fetch(urlStr);
-        if (!res.ok) {
-            // 429 Too Many Requests — always retry with longer delay
-            if (res.status === 429 && attempt <= MAX_RETRIES) {
-                await sleep(BASE_DELAY * 2 ** attempt);
-                return fetchWithRetry(urlStr, attempt + 1);
-            }
-            throw new Error(`API-Tennis error: ${res.status} ${res.statusText}`);
-        }
-        return res;
-    } catch (err) {
+        res = await fetch(urlStr);
+    } catch {
         if (attempt < MAX_RETRIES) {
             await sleep(BASE_DELAY * 2 ** attempt);
-            return fetchWithRetry(urlStr, attempt + 1);
+            return fetchWithRetry(urlStr, env, attempt + 1);
         }
-        throw err;
+        throw new Error('Upstream request failed');
     }
+    // A 429 trips the API-Tennis stop. Do not retry — that hammers the key.
+    if (res.status === 429) {
+        try { await tripApiTennisOn429(env); } catch { /* the thrown stop still stands */ }
+        if (apiTennisHardStopMode(env) !== 'off') throw new QuotaStopError();
+        throw new Error('Upstream request failed');
+    }
+    if (!res.ok) {
+        if (attempt < MAX_RETRIES) {
+            await sleep(BASE_DELAY * 2 ** attempt);
+            return fetchWithRetry(urlStr, env, attempt + 1);
+        }
+        throw new Error('Upstream request failed');
+    }
+    return res;
 }
 
 // ── Public call function ───────────────────────────────────────────────────────
@@ -95,6 +124,10 @@ async function call(env, method, params = {}, opts = {}) {
     if (isDemoMode(env)) {
         return getMock(method, params);
     }
+
+    // Separate from the RapidAPI stop. Checked before the URL is built so a
+    // stopped call does not put TENNIS_API_KEY on the wire.
+    if (await isApiTennisStopActive(env)) apiTennisStopped();
 
     // ── Circuit breaker (live endpoints only) ─────────────────────────────────
     if (opts.circuitBreaker && isCircuitOpen()) {
@@ -113,10 +146,10 @@ async function call(env, method, params = {}, opts = {}) {
     // ── Fetch with retry ──────────────────────────────────────────────────────
     let res;
     try {
-        res = await fetchWithRetry(url.toString());
+        res = await fetchWithRetry(url.toString(), env);
     } catch (err) {
         recordFailure();
-        throw err;
+        throw scrubUpstreamError(err, env);
     }
 
     const json = await res.json();
@@ -145,11 +178,32 @@ function upstreamFailed(status) {
     return err;
 }
 
-async function rapidFetch(env, path, attempt = 1) {
+function scrubUpstreamError(err, env) {
+    if (isQuotaStop(err)) return err;
+    const message = typeof err?.message === 'string' ? err.message : '';
+    const key = env?.TENNIS_API_KEY;
+    // The key is on the request URL. A thrown fetch error often embeds that URL.
+    if (!message || (key && message.includes(key)) || /api\.api-tennis\.com|APIkey=|https?:\/\//i.test(message)) {
+        return new Error('Upstream request failed');
+    }
+    return err;
+}
+
+async function rapidFetch(env, path) {
     // Every RapidAPI caller comes through here. A hard stop throws before fetch.
     if (await isHardStopActive(env)) {
         console.warn('[quota] hard stop active');
         throw new QuotaStopError();
+    }
+    // Global D1 cap. No row, or a thrown claim, means do not fetch.
+    if (hardStopMode(env) === 'on') {
+        try {
+            await claimCallSlot(env, 'rapidapi', rapidDailyCallCap(env));
+        } catch (err) {
+            console.warn('[quota] hard stop active');
+            if (isQuotaStop(err)) throw err;
+            throw new QuotaStopError();
+        }
     }
 
     const url = `${RAPID_BASE}${path}`;
@@ -167,18 +221,23 @@ async function rapidFetch(env, path, attempt = 1) {
             signal,
         });
     } catch {
-        // The attempt left the isolate. Count it even though there is no
-        // response to read a quota header from. No HTTP status on a thrown fetch.
-        try { await noteUpstreamCall(); } catch { /* tally must not change the error */ }
+        // The attempt left the isolate. When the cap is off, count it here.
+        // When the cap is on, claimCallSlot already recorded it.
+        if (hardStopMode(env) !== 'on') {
+            try { await noteUpstreamCall(); } catch { /* off mode tally is best-effort */ }
+        }
         throw upstreamFailed();
     }
-    try { await noteUpstreamCall(); } catch { /* tally must not change the response */ }
+    if (hardStopMode(env) !== 'on') {
+        try { await noteUpstreamCall(); } catch { /* off mode tally is best-effort */ }
+    }
     try {
         await noteRapidQuota(env, res);
     } catch { /* quota bookkeeping must not change the response */ }
-    if (res.status === 429 && attempt <= 3) {
-        await sleep(BASE_DELAY * 2 ** attempt);
-        return rapidFetch(env, path, attempt + 1);
+    // noteRapidQuota already tripped the RapidAPI stop. Do not sleep and retry.
+    if (res.status === 429) {
+        if (hardStopMode(env) === 'on') throw new QuotaStopError();
+        throw upstreamFailed(429);
     }
     // Generic errors only — never path, json.message, the secret, or quota.
     // status is the HTTP status (omitted when fetch itself threw). A 2xx throw
@@ -199,6 +258,29 @@ export const rapidAPI = {
     // { data: [{id, roundId, seed1, seed2, player1, player2, ...}], hasNextPage }
     tournamentFixtures: (env, tour, tournamentId) =>
         rapidFetch(env, `/${tour.toLowerCase()}/fixtures/tournament/${tournamentId}?pageSize=200`),
+
+    // Today, one date, or a date range. Same item shape as tournament fixtures,
+    // plus tournament when include=tournament. { data: [...], hasNextPage }.
+    // Date pieces are YYYY-MM-DD only; callers validate before they get here.
+    fixturesFeed: (env, tour, { dateStart, dateStop, pageNo = 1, pageSize = 100 } = {}) => {
+        const t = String(tour || 'ATP').toLowerCase();
+        const page = Math.max(1, Math.floor(Number(pageNo) || 1));
+        const size = Math.max(1, Math.min(200, Math.floor(Number(pageSize) || 100)));
+        let path = `/${t}/fixtures`;
+        const start = dateStart || '';
+        const stop = dateStop || '';
+        if (start && stop && start !== stop) path += `/${start}/${stop}`;
+        else if (start || stop) path += `/${start || stop}`;
+        const query = `include=round,tournament&filter=PlayerGroup:singles&pageSize=${size}&pageNo=${page}`;
+        return rapidFetch(env, `${path}?${query}`);
+    },
+
+    // One calendar page. calendar() walks every page; backfill must not.
+    calendarPage: (env, tour, year, pageNo = 1, pageSize = 500) => {
+        const size = Math.max(1, Math.min(500, Math.floor(Number(pageSize) || 500)));
+        const page = Math.max(1, Math.floor(Number(pageNo) || 1));
+        return rapidFetch(env, `/${String(tour || 'ATP').toLowerCase()}/tournament/calendar/${year}?pageSize=${size}&pageNo=${page}`);
+    },
 
     // Full tournament calendar for a year — paginated. A requested pageSize=500
     // is accepted but silently capped upstream at ~201 rows/page (same behavior
@@ -319,7 +401,8 @@ export const apiTennis = {
     standings:   (env, eventType)    => call(env, 'get_standings',   { event_type: eventType }),
     tournaments: (env, eventTypeKey) => call(env, 'get_tournaments', { event_type_key: eventTypeKey }),
     // get_livescore removed — Scores live is MatchStat-only (RAPIDAPI_KEY).
-    // Remaining methods still use TENNIS_API_KEY (fixtures / tournaments / H2H).
+    // /api/fixtures uses rapidAPI.fixturesFeed. get_fixtures remains for the
+    // legacy H2H shape only (TENNIS_API_KEY).
     fixtures:    (env, opts = {})    => call(env, 'get_fixtures',    opts),
     player:      (env, playerKey)    => call(env, 'get_players',     { player_key: playerKey }),
     h2h:         (env, keyA, keyB)   => call(env, 'get_H2H',         { first_player_key: keyA, second_player_key: keyB }),

@@ -44,7 +44,7 @@ const LOCAL_STOP_EDGE = 'https://quota.internal/local-stop';
 const MISS_STREAK_EDGE = 'https://quota.internal/miss-streak';
 const MISS_STREAK_TTL = 10 * 60;
 export const QUOTA_CALL_TALLY_EDGE = 'https://quota.internal/call-tally';
-const CALL_TALLY_TTL = 24 * 60 * 60;
+export const DEFAULT_RAPID_DAILY_CALL_CAP = 50;
 
 // One isolate must not write the shared flag more than once per trip.
 let claimedUntil = 0;
@@ -225,23 +225,50 @@ function headerValue(response, name) {
     }
 }
 
-async function bumpCallTally() {
-    let count = 0;
-    try {
-        const cur = await edgeGet(QUOTA_CALL_TALLY_EDGE);
-        count = Number(cur?.count) || 0;
-    } catch {
-        count = 0;
-    }
-    count += 1;
-    try {
-        await edgePut(QUOTA_CALL_TALLY_EDGE, { count }, CALL_TALLY_TTL);
-    } catch { /* tally is best-effort and never KV */ }
+export function rapidDailyCallCap(env) {
+    const raw = env?.RAPIDAPI_DAILY_CALL_CAP;
+    if (raw == null || String(raw).trim() === '') return DEFAULT_RAPID_DAILY_CALL_CAP;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) return DEFAULT_RAPID_DAILY_CALL_CAP;
+    return Math.floor(n);
 }
 
-/** One real upstream attempt. Edge only. Does not trip the shared stop. */
+/** Seconds until the next 00:00 UTC. The call tally lives only for that day. */
+export function secondsUntilNextUtcDay(now = new Date()) {
+    const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+    return Math.max(1, Math.ceil((next - now.getTime()) / 1000));
+}
+
+function tallyDay(now = new Date()) {
+    return now.toISOString().slice(0, 10);
+}
+
+async function readCallTally() {
+    const day = tallyDay();
+    try {
+        const cur = await edgeGet(QUOTA_CALL_TALLY_EDGE);
+        if (!cur || (cur.day && cur.day !== day)) return { day, count: 0 };
+        const count = Number(cur.count);
+        return { day, count: Number.isFinite(count) && count > 0 ? count : 0 };
+    } catch {
+        return null;
+    }
+}
+
+async function bumpCallTally() {
+    const cur = await readCallTally();
+    const day = cur?.day || tallyDay();
+    const count = (cur?.count || 0) + 1;
+    // Expire at the next UTC midnight so a full day cannot resume calls
+    // early, and a new day does not inherit yesterday's count.
+    await edgePut(QUOTA_CALL_TALLY_EDGE, { day, count }, secondsUntilNextUtcDay());
+}
+
+/** One real upstream attempt while the hard stop is off. Edge only. The on-mode cap is D1 call_tally. */
 export async function noteUpstreamCall() {
-    await bumpCallTally();
+    try {
+        await bumpCallTally();
+    } catch { /* off mode does not enforce the cap */ }
 }
 
 /** After a RapidAPI response. Trip logic is a no-op unless the setting is `on`. */

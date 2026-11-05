@@ -17,6 +17,20 @@ binding   = "ASSETS"
 binding = "TENNIS_CACHE"
 id      = "71f4016e2aa14b9c8bba916d05086fe1"
 
+# ── D1 last-good store ─────────────────────────────────────────────────────────
+# Do NOT deploy while database_id is the placeholder below.
+#   npx wrangler d1 create tennisworld
+#   paste the printed database_id over the placeholder
+#   npx wrangler d1 migrations apply tennisworld --local
+#   npx wrangler d1 migrations apply tennisworld --remote
+# Only then deploy. A deploy before that has no D1 and the daily caps fail closed.
+# fixtures (tour, match_key) is the key a later picks table should reference.
+[[d1_databases]]
+binding = "DB"
+database_name = "tennisworld"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
 # ── Secrets ────────────────────────────────────────────────────────────────────
 # Never commit real values. Set with:
 #   npx wrangler secret put RAPIDAPI_KEY      # Scores live + Core MatchStat
@@ -38,6 +52,25 @@ DEMO_MODE    = "false"                   # Set to "true" to serve mock data (no 
 # stay on the last edge entry; uncached pages come back empty or 500 with a
 # generic upstream error (no remaining count, reset, or stop flag).
 RAPIDAPI_HARD_STOP = "on"
+# API-Tennis.com (TENNIS_API_KEY) stop. Separate from RAPIDAPI_HARD_STOP.
+# Same on/off/force strings. Unset defaults to on. A 429 trips it and is not retried.
+# API_TENNIS_DAILY_CAP is the per-location UTC-day call cap while the stop is on.
+API_TENNIS_HARD_STOP = "on"
+API_TENNIS_DAILY_CAP = "100"
+# Global UTC-day cap on RapidAPI calls while RAPIDAPI_HARD_STOP is on.
+# The counter is D1 call_tally, shared across colos. Not KV (last-write-wins
+# would let parallel calls overshoot). Overage is billed per call (September
+# 2026 was a $167 overage). The plan quota resets on the 16th. 50/day stays
+# inside a normal month. At the cap, or if the claim statement throws, routes
+# serve the last D1 copy and do not call RapidAPI until the next UTC day.
+# Unset uses the same default of 50. Backfill counts against this cap and
+# against D1_DAILY_WRITE_BUDGET.
+RAPIDAPI_DAILY_CALL_CAP = "50"
+# Daily cap on D1 row upserts (live pulls and backfill). Unset uses 20000.
+# 0 blocks new writes; reads of rows already stored still serve.
+D1_DAILY_WRITE_BUDGET = "20000"
+# Max rows one POST /api/admin/backfill-last-good call may write. Hard ceiling 200.
+D1_BACKFILL_BATCH = "40"
 
 # ── Scheduled cron triggers ────────────────────────────────────────────────────
 # Rankings + calendar: refresh every 6 hours (data doesn't change often)

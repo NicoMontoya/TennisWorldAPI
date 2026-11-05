@@ -2,6 +2,7 @@ import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { calendarYearFor } from '../calendarYear.js';
 import { isQuotaStop } from '../quotaStop.js';
+import { requireAdmin } from '../adminAuth.js';
 
 // GET /api/vintage-roster?tour=ATP|WTA        → { roster }
 // GET /api/player-vintage?tour=ATP|WTA&playerKey=47275 → { player, points, totals }
@@ -63,7 +64,7 @@ async function getTierMap(env, tour, years) {
     // Sequential, not Promise.all: calendar() now pages ~5 requests/year (was 1,
     // pre-pagination-fix), so firing every year concurrently for a long career
     // (Djokovic: 23 years) bursts 100+ near-simultaneous RapidAPI requests,
-    // exhausts rapidFetch's 429 retry budget, and the per-year catch below
+    // a 429 trips the RapidAPI stop, and the per-year catch below
     // silently empties the whole tier map — titles/masters/slams all read 0.
     // Each year is cached 30d, so the one-time sequential cold-fill cost is
     // paid once system-wide, not per player/request.
@@ -139,10 +140,7 @@ export async function handleVintageRoster(request, env) {
 // Auth: x-admin-secret header. Stores each legend's precomputed curve + the
 // legends index the roster route merges in. Idempotent (overwrites).
 export async function handleImportVintage(request, env) {
-    const secret = request.headers.get('x-admin-secret') || '';
-    if (!env.ADMIN_SECRET || secret !== env.ADMIN_SECRET) {
-        throw Object.assign(new Error('Unauthorized'), { status: 401 });
-    }
+    requireAdmin(request, env);
     const { tour, curves, legends } = await request.json();
     if (!tour || !curves) throw new Error('tour and curves are required');
     const t = String(tour).toUpperCase();

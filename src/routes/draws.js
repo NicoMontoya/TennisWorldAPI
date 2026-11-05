@@ -4,6 +4,8 @@ import { TTL }      from '../config.js';
 import { assignSlotOrder } from '../bracketSlots.js';
 import { parseTour, parseTournamentKey } from '../security.js';
 import { DRAWS_CACHE_RESOURCE, readOfficialDraw } from '../officialDraw.js';
+import { tagAsOf } from '../asOf.js';
+import { readDraw, rememberDraw } from '../d1Store.js';
 
 // roundId → { name, order } (order 1 = Final, higher = earlier round)
 const ROUND = {
@@ -126,10 +128,8 @@ export async function handleDraws(request, env) {
             rapidAPI.tournamentFixtures(env, tour, tournamentKey),
             rapidAPI.tournamentInfo(env, tour, tournamentKey).catch(() => null),
         ]);
-    } catch (err) {
-        const stale = await cache.getStale(env, ...cacheKey);
-        if (stale) return stale.data;
-        throw err;
+    } catch {
+        return serveStoredDraw(env, cacheKey, tournamentKey, tour);
     }
 
     const completedMatches = resultsData?.data?.singles  || [];
@@ -247,6 +247,22 @@ export async function handleDraws(request, env) {
     else if (!anyDecided)        ttl = 60 * 60;         //   1 hr  — not started (draw/qualifiers settling)
     else                         ttl = TTL.fixtures;    //  24 hr  — completed, nothing left to change
 
+    try { await rememberDraw(env, tour, tournamentKey, result); } catch { /* last-good is best-effort */ }
     await cache.set(env, ttl, result, ...cacheKey);
     return result;
+}
+
+async function serveStoredDraw(env, cacheKey, tournamentKey, tour) {
+    const saved = await readDraw(env, tour, tournamentKey);
+    if (saved?.payload) return tagAsOf(saved.payload, saved.asOf);
+    try {
+        const stale = await cache.getStale(env, ...cacheKey);
+        if (stale?.data) return tagAsOf(stale.data, stale.cachedAt || stale.fetchedAt);
+    } catch { /* empty draw below */ }
+    return {
+        tournamentKey,
+        name: '',
+        totalMatches: 0,
+        rounds: [],
+    };
 }

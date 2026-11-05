@@ -2,6 +2,8 @@ import { cache }    from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL }      from '../config.js';
 import { officialRankingDate } from './playerRankHistory.js';
+import { tagAsOf } from '../asOf.js';
+import { readStandings, rememberStandings } from '../d1Store.js';
 
 // GET /api/standings?tour=ATP|WTA
 // Returns all players currently ranked (with ATP/WTA points), sorted by rank.
@@ -33,26 +35,39 @@ export async function handleStandings(request, env) {
             ? allItems.filter(i => i.date === latestDate)
             : allItems;
 
-        const data = items
-            .filter(r => r.player?.id)
-            .map(r => ({
-                rank:      r.position                  || 0,
-                movement:  r.player?.progress > 0 ? 1 : r.player?.progress < 0 ? -1 : 0,
-                playerKey: String(r.player.id),
-                name:      r.player?.name              || '',
-                country:   r.player?.country?.name     || r.player?.countryAcr || '',
-                birthday:  r.player?.birthday          || null,
-                points:    r.point                     || 0,
-                rankingDate: officialRankingDate(r.date),
-                tour,
-            }))
-            .sort((a, b) => a.rank - b.rank);
+        const data = mapStandings(items, tour);
 
+        try { await rememberStandings(env, tour, data, { replace: true }); } catch { /* last-good is best-effort */ }
         await cache.set(env, TTL.standings, data, 'standings2', tour);
         return data;
-    } catch (err) {
-        const stale = await cache.getStale(env, 'standings2', tour);
-        if (stale) return stale.data;
-        throw err;
+    } catch {
+        return serveStoredStandings(env, tour);
     }
+}
+
+export function mapStandings(items, tour) {
+    return (items || [])
+        .filter(r => r.player?.id)
+        .map(r => ({
+            rank:      r.position                  || 0,
+            movement:  r.player?.progress > 0 ? 1 : r.player?.progress < 0 ? -1 : 0,
+            playerKey: String(r.player.id),
+            name:      r.player?.name              || '',
+            country:   r.player?.country?.name     || r.player?.countryAcr || '',
+            birthday:  r.player?.birthday          || null,
+            points:    r.point                     || 0,
+            rankingDate: officialRankingDate(r.date),
+            tour,
+        }))
+        .sort((a, b) => a.rank - b.rank);
+}
+
+async function serveStoredStandings(env, tour) {
+    const saved = await readStandings(env, tour);
+    if (saved?.hadRows) return tagAsOf(saved.rows, saved.asOf);
+    try {
+        const stale = await cache.getStale(env, 'standings2', tour);
+        if (Array.isArray(stale?.data)) return tagAsOf(stale.data, stale.cachedAt || stale.fetchedAt);
+    } catch { /* empty list below */ }
+    return [];
 }

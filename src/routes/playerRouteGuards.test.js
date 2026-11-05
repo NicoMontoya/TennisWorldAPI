@@ -292,7 +292,7 @@ describe('player-stats and player-history guards', () => {
             const res = await worker.fetch(get(`${path}?tour=ATP&playerKey=${playerKey}`), env);
             expect(res.status).toBe(200);
             expect((await res.json()).data).toEqual(emptyData(path));
-            expect(calls.length).toBeGreaterThan(1);
+            expect(calls).toHaveLength(1);
             expect(env.TENNIS_CACHE._puts).toHaveLength(0);
             expect(edgeSpy).toHaveBeenCalledTimes(1);
             expect(edgeSpy.mock.calls[0][0]).toBe(120);

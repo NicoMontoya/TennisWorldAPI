@@ -1,11 +1,13 @@
 import { rapidAPI }                              from '../apiClient.js';
 import { isQuotaStop }                           from '../quotaStop.js';
 import { cache }                                 from '../cache.js';
+import { requireAdmin }                          from '../adminAuth.js';
 import { readHistory, writeHistory, appendSnapshot, KV_MAX_ENTRIES } from './playerRankHistory.js';
 import { readMatchLog, writeMatchLog, mergeMatches } from './playerMatches.js';
 import { H2H_CACHE_VERSION }                     from './h2h.js';
 
-// GET /api/admin/backfill-rankings?tour=ATP|WTA&weeksBack=26&secret=XXX
+// POST /api/admin/backfill-rankings?tour=ATP|WTA&weeksBack=26
+// Header: x-admin-secret. Query `secret` is ignored. Weeks are capped at MAX_WEEKS.
 //
 // One-time (or occasional) operation that populates KV ranking history from the
 // RapidAPI historical snapshots endpoint.
@@ -48,41 +50,38 @@ function weeklyDates(weeksBack, offset = 0) {
     return dates.reverse();
 }
 
-// GET /api/admin/clear-rank-history?tour=ATP|WTA&secret=XXX
-// Deletes all rank-history KV entries for a tour by scanning known player IDs
-// from the current standings. Use after a bad backfill run.
-export async function handleClearRankHistory(request, env) {
-    const { searchParams } = new URL(request.url);
-    const secret = searchParams.get('secret') || '';
-    if (!env.ADMIN_SECRET || secret !== env.ADMIN_SECRET) {
-        const err = new Error('Unauthorized'); err.status = 401; throw err;
-    }
+// POST /api/admin/clear-rank-history?tour=ATP|WTA
+// Deletes rank-history KV entries for a tour, one capped batch per call.
+// Auth: x-admin-secret. Fail closed when ADMIN_SECRET is unset.
+const CLEAR_BATCH = 500;
 
+export async function handleClearRankHistory(request, env) {
+    requireAdmin(request, env);
+
+    const { searchParams } = new URL(request.url);
     const tour = (searchParams.get('tour') || 'ATP').toUpperCase();
 
     // Pull current standings to get the player IDs we wrote history for
     const res     = await rapidAPI.rankings(env, tour, 500);
     const players = (res?.data || []).map(r => String(r.player?.id)).filter(Boolean);
 
+    const batch = players.slice(0, CLEAR_BATCH);
     let deleted = 0;
-    for (const playerKey of players) {
+    for (const playerKey of batch) {
         const key = `tw:rank-history:v1:${tour}:${playerKey}`;
         await env.TENNIS_CACHE.delete(key);
         deleted++;
     }
 
-    return { ok: true, tour, deleted };
+    return { ok: true, tour, deleted, capped: players.length > CLEAR_BATCH };
 }
 
 // POST /api/admin/import-rank-history
 // Accepts pre-processed history from the local backfill-sackmann.ts script.
 // Body: { tour: "ATP"|"WTA", histories: { [playerKey]: [{date, rank}] } }
-// Auth: x-admin-secret header.
+// Auth: x-admin-secret header. POST only. Fail closed when unset.
 export async function handleImportRankHistory(request, env) {
-    const secret = request.headers.get('x-admin-secret') || '';
-    if (!env.ADMIN_SECRET || secret !== env.ADMIN_SECRET) {
-        const err = new Error('Unauthorized'); err.status = 401; throw err;
-    }
+    requireAdmin(request, env);
 
     const { tour, histories } = await request.json();
     if (!tour || !histories) throw new Error('tour and histories are required');
@@ -117,12 +116,9 @@ export async function handleImportRankHistory(request, env) {
 // backfill-h2h-matches.ts script (seeded from Jeff Sackmann's archive) so /api/h2h
 // can surface complete history including retired opponents.
 // Body: { tour: "ATP"|"WTA", logs: { [playerKey]: [MatchRec] } }
-// Auth: x-admin-secret header.
+// Auth: x-admin-secret header. POST only. Fail closed when unset.
 export async function handleImportMatches(request, env) {
-    const secret = request.headers.get('x-admin-secret') || '';
-    if (!env.ADMIN_SECRET || secret !== env.ADMIN_SECRET) {
-        const err = new Error('Unauthorized'); err.status = 401; throw err;
-    }
+    requireAdmin(request, env);
 
     const { tour, logs } = await request.json();
     if (!tour || !logs) throw new Error('tour and logs are required');
@@ -150,13 +146,8 @@ export async function handleImportMatches(request, env) {
 }
 
 export async function handleBackfillRankings(request, env) {
+    requireAdmin(request, env);
     const { searchParams } = new URL(request.url);
-
-    // ── Auth ──────────────────────────────────────────────────────────────────
-    const secret = searchParams.get('secret') || '';
-    if (!env.ADMIN_SECRET || secret !== env.ADMIN_SECRET) {
-        const err = new Error('Unauthorized'); err.status = 401; throw err;
-    }
 
     const tour      = (searchParams.get('tour') || 'ATP').toUpperCase();
     const weeksBack = Math.min(Number(searchParams.get('weeksBack') || 26), MAX_WEEKS);
@@ -198,7 +189,7 @@ export async function handleBackfillRankings(request, env) {
                 log.push(`${date}: upstream unavailable`);
                 break;
             }
-            log.push(`${date}: ERROR — ${e.message}`);
+            log.push(`${date}: upstream failed`);
         }
         await sleep(CALL_DELAY);
     }
@@ -230,7 +221,7 @@ export async function handleBackfillRankings(request, env) {
             written++;
         } catch (e) {
             errors++;
-            log.push(`kv-err:${playerKey} — ${e.message}`);
+            log.push(`kv-err:${playerKey}`);
         }
     }
 

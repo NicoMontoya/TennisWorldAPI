@@ -1,3 +1,5 @@
+import { requireAdmin } from '../adminAuth.js';
+
 // ===================================
 // TennisWorld — Historical Rankings (date-keyed, back to 1973)
 // ===================================
@@ -70,10 +72,7 @@ export async function handleRankingsHistory(request, env) {
 // Stores one year's weekly snapshots and merges the year's dates into the index.
 // Auth: x-admin-secret header. Idempotent (re-import overwrites the year + merges dates).
 export async function handleImportRankingsHistory(request, env) {
-    const secret = request.headers.get('x-admin-secret') || '';
-    if (!env.ADMIN_SECRET || secret !== env.ADMIN_SECRET) {
-        throw Object.assign(new Error('Unauthorized'), { status: 401 });
-    }
+    requireAdmin(request, env);
 
     const { tour, year, snapshots, updateIndex = true, indexDates } = await request.json();
     if (!tour || !year || !snapshots || typeof snapshots !== 'object') {
