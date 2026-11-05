@@ -28,7 +28,7 @@ id      = "71f4016e2aa14b9c8bba916d05086fe1"
 [[d1_databases]]
 binding = "DB"
 database_name = "tennisworld"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "d41c5de5-46d1-4988-8f61-c34833a6b64a"
 migrations_dir = "migrations"
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
