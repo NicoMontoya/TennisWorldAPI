@@ -87,14 +87,22 @@ async function readTally() {
     }
 }
 
-/** Count one call that left this isolate. No-op when the setting is off or force. */
-export async function noteApiTennisCall(env) {
+/**
+ * Record one API-Tennis attempt before fetch. A thrown counter read or write
+ * fails closed (QuotaStopError) so the caller does not hit upstream.
+ * No-op unless the stop is `on`.
+ */
+export async function commitApiTennisCall(env) {
     if (apiTennisHardStopMode(env) !== 'on') return;
-    const cur = await readTally();
-    if (!cur) return;
+    const tally = await readTally();
+    if (!tally || tally.count >= apiTennisDailyCap(env) || !cacheApi()) {
+        throw new QuotaStopError();
+    }
     try {
-        await edgePut(TALLY_EDGE, { day: cur.day, count: cur.count + 1 }, TALLY_TTL);
-    } catch { /* tally is best-effort */ }
+        await edgePut(TALLY_EDGE, { day: tally.day, count: tally.count + 1 }, TALLY_TTL);
+    } catch {
+        throw new QuotaStopError();
+    }
 }
 
 async function tripLocal(ttlSec) {

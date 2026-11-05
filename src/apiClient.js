@@ -26,6 +26,7 @@ import {
     isHardStopActive,
     isQuotaStop,
     isRapidDailyCapReached,
+    commitRapidDailyCall,
     noteRapidQuota,
     noteUpstreamCall,
     hardStopMode,
@@ -33,7 +34,7 @@ import {
 } from './quotaStop.js';
 import {
     isApiTennisStopActive,
-    noteApiTennisCall,
+    commitApiTennisCall,
     tripApiTennisOn429,
     apiTennisHardStopMode,
     apiTennisStopped,
@@ -85,18 +86,19 @@ function sleep(ms) {
 
 // urlStr contains TENNIS_API_KEY. Never put it on an Error or a log line.
 async function fetchWithRetry(urlStr, env, attempt = 1) {
+    // Count this attempt before fetch. A thrown counter read/write must not
+    // reach the network. QuotaStopError is not retried.
+    if (apiTennisHardStopMode(env) === 'on') await commitApiTennisCall(env);
     let res;
     try {
         res = await fetch(urlStr);
     } catch {
-        try { await noteApiTennisCall(env); } catch { /* tally must not change the error */ }
         if (attempt < MAX_RETRIES) {
             await sleep(BASE_DELAY * 2 ** attempt);
             return fetchWithRetry(urlStr, env, attempt + 1);
         }
         throw new Error('Upstream request failed');
     }
-    try { await noteApiTennisCall(env); } catch { /* tally must not change the response */ }
     // A 429 trips the API-Tennis stop. Do not retry — that hammers the key.
     if (res.status === 429) {
         try { await tripApiTennisOn429(env); } catch { /* the thrown stop still stands */ }
@@ -191,6 +193,16 @@ async function rapidFetch(env, path) {
         console.warn('[quota] hard stop active');
         throw new QuotaStopError();
     }
+    // Cap is on: persist the tally first. A thrown write does not fetch.
+    if (hardStopMode(env) === 'on') {
+        try {
+            await commitRapidDailyCall(env);
+        } catch (err) {
+            console.warn('[quota] hard stop active');
+            if (isQuotaStop(err)) throw err;
+            throw new QuotaStopError();
+        }
+    }
 
     const url = `${RAPID_BASE}${path}`;
     const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout
@@ -207,12 +219,16 @@ async function rapidFetch(env, path) {
             signal,
         });
     } catch {
-        // The attempt left the isolate. Count it even though there is no
-        // response to read a quota header from. No HTTP status on a thrown fetch.
-        try { await noteUpstreamCall(); } catch { /* tally must not change the error */ }
+        // The attempt left the isolate. When the cap is off, count it here.
+        // When the cap is on, commitRapidDailyCall already recorded it.
+        if (hardStopMode(env) !== 'on') {
+            try { await noteUpstreamCall(); } catch { /* off mode tally is best-effort */ }
+        }
         throw upstreamFailed();
     }
-    try { await noteUpstreamCall(); } catch { /* tally must not change the response */ }
+    if (hardStopMode(env) !== 'on') {
+        try { await noteUpstreamCall(); } catch { /* off mode tally is best-effort */ }
+    }
     try {
         await noteRapidQuota(env, res);
     } catch { /* quota bookkeeping must not change the response */ }

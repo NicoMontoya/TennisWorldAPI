@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from './index.js';
 import { apiTennis, rapidAPI } from './apiClient.js';
 import { createMemoryD1 } from './d1Memory.js';
-import { rememberDraw, rememberFixtures, rememberStandings, rememberTournaments } from './d1Store.js';
+import { rememberApiTennisList, rememberDraw, rememberFixtures, rememberStandings, rememberTournaments } from './d1Store.js';
 import { QUOTA_CALL_TALLY_EDGE, resetQuotaStopStateForTests } from './quotaStop.js';
 
 const TENNIS_KEY = 'super-secret-tennis-key';
@@ -270,5 +270,59 @@ describe('upstream key and backfill caps', () => {
         expect(body.data[0]).toMatchObject({ matchKey: '42', tournamentName: 'Paris' });
         expect(calls).toHaveLength(1);
         assertNoSecret(JSON.stringify(body));
+    });
+
+    it('fails closed when a daily call counter read or write throws, and serves D1', async () => {
+        async function seed(env) {
+            await rememberFixtures(env, 'ATP', [{
+                matchKey: '42',
+                tournamentKey: '7',
+                tournamentName: 'Paris',
+                date: '2099-01-02',
+                time: '11:00',
+                status: 'Not Started',
+                round: 'Final',
+                player1Name: 'Ada',
+                player2Name: 'Bea',
+            }]);
+            await rememberApiTennisList(env, 'tournaments', 'ATP', [{
+                tournamentKey: '2004',
+                name: 'Madrid',
+            }]);
+        }
+        function breakCounter(which) {
+            const cache = globalThis.caches.default;
+            const match = cache.match.bind(cache);
+            const put = cache.put.bind(cache);
+            const isTally = (req) => String(req?.url || req).includes('call-tally');
+            cache.match = async (req) => {
+                if (which === 'read' && isTally(req)) throw new Error('tally read failed');
+                return match(req);
+            };
+            cache.put = async (req, res) => {
+                if (which === 'write' && isTally(req)) throw new Error('tally write failed');
+                return put(req, res);
+            };
+        }
+        async function expectStored(env, path, needle) {
+            const res = await worker.fetch(new Request(`https://example.test${path}`), env);
+            const text = await res.text();
+            const body = JSON.parse(text);
+            expect(res.status).toBe(200);
+            expect(body.asOf).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+            expect(text).toContain(needle);
+            assertNoSecret(text);
+            assertNoSecret(logs.join('\n'));
+        }
+
+        for (const which of ['read', 'write']) {
+            const env = cacheEnv({ RAPIDAPI_DAILY_CALL_CAP: '50', API_TENNIS_DAILY_CAP: '100' });
+            await seed(env);
+            breakCounter(which);
+            const calls = installFetch(() => { throw new Error('fetch must not be called'); });
+            await expectStored(env, '/api/fixtures?tour=ATP', 'Paris');
+            await expectStored(env, '/api/tournaments?tour=ATP', 'Madrid');
+            expect(calls).toHaveLength(0);
+        }
     });
 });

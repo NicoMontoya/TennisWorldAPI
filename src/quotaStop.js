@@ -259,11 +259,9 @@ async function bumpCallTally() {
     const cur = await readCallTally();
     const day = cur?.day || tallyDay();
     const count = (cur?.count || 0) + 1;
-    try {
-        // Expire at the next UTC midnight so a full day cannot resume calls
-        // early, and a new day does not inherit yesterday's count.
-        await edgePut(QUOTA_CALL_TALLY_EDGE, { day, count }, secondsUntilNextUtcDay());
-    } catch { /* tally is best-effort and never KV */ }
+    // Expire at the next UTC midnight so a full day cannot resume calls
+    // early, and a new day does not inherit yesterday's count.
+    await edgePut(QUOTA_CALL_TALLY_EDGE, { day, count }, secondsUntilNextUtcDay());
 }
 
 /**
@@ -279,9 +277,33 @@ export async function isRapidDailyCapReached(env) {
     return tally.count >= rapidDailyCallCap(env);
 }
 
-/** One real upstream attempt. Edge only. Does not trip the shared stop. */
+/**
+ * Record one RapidAPI attempt before fetch. A thrown counter read or write
+ * fails closed (QuotaStopError) so the caller does not hit upstream.
+ * No-op unless the hard stop is `on` — `off` still tallies after the call.
+ */
+export async function commitRapidDailyCall(env) {
+    if (hardStopMode(env) !== 'on') return;
+    const tally = await readCallTally();
+    if (!tally || tally.count >= rapidDailyCallCap(env) || !cacheApi()) {
+        throw new QuotaStopError();
+    }
+    try {
+        await edgePut(
+            QUOTA_CALL_TALLY_EDGE,
+            { day: tally.day, count: tally.count + 1 },
+            secondsUntilNextUtcDay(),
+        );
+    } catch {
+        throw new QuotaStopError();
+    }
+}
+
+/** One real upstream attempt while the hard stop is off. Edge only. */
 export async function noteUpstreamCall() {
-    await bumpCallTally();
+    try {
+        await bumpCallTally();
+    } catch { /* off mode does not enforce the cap */ }
 }
 
 /** After a RapidAPI response. Trip logic is a no-op unless the setting is `on`. */
