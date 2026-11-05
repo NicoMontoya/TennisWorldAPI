@@ -14,6 +14,7 @@ export const TTL = {
     hub:           5  * 60,       //  5 min — featured match + today's board
     drawsLive:     5  * 60,       //  5 min — in-play draw page (not the ticker)
     fixtures:      24 * 60 * 60,  // 24 hr  — match results finalized same day
+    fixturesEmpty: 60,            // 60s — empty board; retry soon instead of pinning [] for a day
     standings:     48 * 60 * 60,  // 48 hr  — ATP/WTA points update weekly; 48hr is safe
     tournaments:   48 * 60 * 60,  // 48 hr  — tournament schedule rarely changes
     players:       72 * 60 * 60,  // 72 hr  — player stats/profiles, very stable

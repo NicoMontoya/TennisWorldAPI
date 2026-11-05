@@ -76,4 +76,16 @@ describe('D1 write budget', () => {
         expect(saved.rows[0].player1Name).toBe('New');
         expect(env.DB._tables.fixtures[0].starts_at_utc).toBe('2026-11-05T14:30:00.000Z');
     });
+
+    it('does not erase saved fixtures when the new list is empty', async () => {
+        const env = envWith(10);
+        await rememberFixtures(env, 'ATP', [
+            { matchKey: '1', tournamentKey: '21362', date: '2026-11-06', player1Name: 'A' },
+        ]);
+        const empty = await rememberFixtures(env, 'ATP', []);
+        expect(empty).toEqual({ written: 0 });
+        expect(env.DB._tables.fixtures).toHaveLength(1);
+        const saved = await readFixtures(env, { tour: 'ATP', tournamentKey: '21362' });
+        expect(saved.rows.map(row => row.matchKey)).toEqual(['1']);
+    });
 });
