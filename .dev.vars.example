@@ -4,13 +4,18 @@
 # MatchStat / RapidAPI — Scores live + Core (fixtures, rankings, draws)
 RAPIDAPI_KEY=your-rapidapi-key-here
 
-# api-tennis.com — leftover routes only (fixtures/tournaments/H2H). Not Scores live.
+# api-tennis.com — leftover routes only (tournaments / H2H). Not Scores live or /api/fixtures.
 TENNIS_API_KEY=your-api-tennis-com-key-here
 
 # Set to "true" to run leftover api-tennis routes without that key (mock data)
 DEMO_MODE=false
 
-# RapidAPI hard stop. Also set in wrangler.toml [vars] (ships as off).
+# API-Tennis stop. Same on/off/force strings as RAPIDAPI_HARD_STOP. Unset defaults to on.
+# A 429 trips it and is not retried. API_TENNIS_DAILY_CAP is the per-day call cap while on.
+# API_TENNIS_HARD_STOP=on
+# API_TENNIS_DAILY_CAP=100
+
+# RapidAPI hard stop. Also set in wrangler.toml [vars] (ships as on).
 # Exact values only: off = never, on = stop when the quota is exhausted, force = stop now.
 # Unset defaults to off. Any other present value (blank, typo, "ON ") acts as on.
 # RAPIDAPI_HARD_STOP=off

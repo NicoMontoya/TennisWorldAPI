@@ -54,6 +54,7 @@
 // mistake the permanent record for an edge wrapper.
 
 import { cache } from '../cache.js';
+import { requireAdmin } from '../adminAuth.js';
 import { parseTour, rateLimit } from '../security.js';
 import { indexKey } from './rankingsHistory.js';
 import { canonicalPlayerKey, MIN_RANKED_WEEKS } from '../rankByAge.js';
@@ -203,10 +204,7 @@ export async function handleVintageRankByAge(request, env) {
 // Auth: x-admin-secret. One permanent KV put per player (no TTL). Idempotent.
 // WTA is rejected so a mistaken run cannot spend the daily write budget.
 export async function handleImportVintageRankByAge(request, env) {
-    const secret = request.headers.get('x-admin-secret') || '';
-    if (!env.ADMIN_SECRET || secret !== env.ADMIN_SECRET) {
-        httpError(401, 'Unauthorized');
-    }
+    requireAdmin(request, env);
 
     const body = await request.json();
     const tour = parseTour(body?.tour);

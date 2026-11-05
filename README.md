@@ -15,7 +15,8 @@ One Cloudflare Worker (`tennisworld-api`) serves everything:
 - KV (`TENNIS_CACHE`) — durable cache (rankings, vintage, match logs, auth, sessions, favorites). Not used for hub/livescore payloads.
 - Cache API (`caches.default`) — hub/livescore public payloads + per-IP rate-limit counters (not KV)
 - Cron (every 6h) — warms standings + calendar caches, seeds rank snapshots
-- Upstreams: MatchStat / RapidAPI `tennis-api-atp-wta-itf` (live scores via Extend `/extend/api/events/live`, plus Core fixtures/rankings/draws). api-tennis.com remains for a few legacy routes (tournaments, surface standings) — not Scores live.
+- Upstreams: MatchStat / RapidAPI `tennis-api-atp-wta-itf` (live scores via Extend `/extend/api/events/live`, plus Core fixtures/rankings/draws/calendar). api-tennis.com remains for a few legacy routes (tournaments, surface standings) — not Scores live.
+- D1 (`DB`) — last-good copy of calendar, draws, fixtures, and standings. Create and migrate before the first deploy that includes the binding (see the Phase 0 PR / `migrations/`).
 
 The frontend picks its API base automatically: same-origin in production, `localhost:8787`
 when a local static server (any port other than 8787) is used during development.
@@ -91,7 +92,7 @@ curl -s -o /dev/null -w '%{http_code}\n' "$BASE/api/debug"  # expect 404 (remove
 
 Rollback: `npx wrangler rollback` (or redeploy the previous git tag).
 
-After first deploy: run `curl "$BASE/api/admin/backfill-rankings?tour=ATP&weeksBack=26&secret=…"`
+After first deploy: run `curl -X POST -H "x-admin-secret: $ADMIN_SECRET" "$BASE/api/admin/backfill-rankings?tour=ATP&weeksBack=26"`
 once so player-profile ranking charts have history immediately (cron keeps them fresh after).
 
 ATP Sackmann historical data (career rank arcs, Time Machine weekly lists,
@@ -120,6 +121,7 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
 - **RapidAPI / MatchStat plan limits** — Scores live uses the existing `RAPIDAPI_KEY`
   Worker secret (60s edge TTL while anything is live, scheduled, or delayed).
   Leftover api-tennis.com routes still use `TENNIS_API_KEY`.
+- **`API_TENNIS_HARD_STOP`** is separate from `RAPIDAPI_HARD_STOP` and applies only to `call()` (`TENNIS_API_KEY`). Same `on` / `off` / `force` strings. Unset defaults to `on`. A 429 trips it and is not retried. While `on`, a per-location UTC-day tally (`API_TENNIS_DAILY_CAP`, default 100) blocks further API-Tennis calls. `/api/tournaments` then serves the last D1 copy with `asOf`.
 - **`RAPIDAPI_HARD_STOP`** (`wrangler.toml` `[vars]`, ships as `off`). `on` stops
   new RapidAPI calls once quota is exhausted. A response that carries
   `x-ratelimit-requests-remaining` and is non-numeric, zero, or negative trips
@@ -127,7 +129,13 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
   streak (not KV) and trips the shared flag at 3. The streak resets only on a
   2xx with a valid remaining count. Header-less non-2xx responses do not trip
   and do not change the streak. 429 always trips. Every fetch that is actually
-  sent, including 5xx, increments a separate edge call tally. `off` never
+  sent, including 5xx, increments a separate edge call tally. While `on`,
+  `RAPIDAPI_DAILY_CALL_CAP` (wrangler var, default 50) is that tally's UTC-day
+  ceiling. RapidAPI bills overage per call — September 2026 was a $167 overage —
+  and the plan quota resets on the 16th of each month. At the cap, calendar,
+  draws, fixtures, and standings serve the last D1 copy and do not call
+  RapidAPI again until the next UTC day. Backfill counts against this cap and
+  against `D1_DAILY_WRITE_BUDGET`. `off` never
   stops. `force` stops immediately, before any fetch. Unset is `off`. Only the exact strings `off`, `on`, and
   `force` are recognized; any other present value (blank, different case,
   trailing space, typo) acts as `on`. There is no route to change it. The
@@ -152,7 +160,7 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
 
 ## Security notes
 
-- `/api/admin/*` routes require `ADMIN_SECRET` (secret, never a var) and fail closed when unset.
+- `/api/admin/*` import and backfill routes are POST-only, require the `x-admin-secret` header (`ADMIN_SECRET`, a secret, never a var), and fail closed when it is unset. A query-string secret is ignored.
 - Auth: PBKDF2 (100k iters, per-user salt), 30-day KV sessions, Bearer tokens.
 - Register/login are rate-limited per IP (best-effort KV counter, 10 per 10 min).
 - `GET /api/hub` and `GET /api/livescore` are rate-limited per IP via the Cache API (`https://rl.internal/{hub|livescore}/{ip}`, 60 per 60s). Livescore cache is 60s when matches are live, scheduled, or delayed, and 2 min only when the board is finished-only / empty; hub stays 5 min (live overlay from the livescore cache on hit). Auth register/login remain on a KV counter.

@@ -548,9 +548,16 @@ describe('RapidAPI quota hard stop', () => {
                 expect(`${k}: ${v}`).not.toMatch(LEAK);
             }
             const body = JSON.parse(text);
-            if (path.includes('/hub') || path.includes('/draws')) {
+            if (path.includes('/hub')) {
                 expect(res.status).toBe(500);
                 expect(body).toEqual({ ok: false, error: 'Upstream request failed' });
+            } else if (path.includes('/draws')) {
+                // Nothing stored: empty draw, not a 500 and not a quota detail.
+                expect(res.status).toBe(200);
+                expect(body).toEqual({
+                    ok: true,
+                    data: { tournamentKey: '20340', name: '', totalMatches: 0, rounds: [] },
+                });
             } else {
                 expect(res.status).toBe(200);
                 expect(body.ok).toBe(true);

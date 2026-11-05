@@ -2,6 +2,7 @@ import { cache } from './cache.js';
 import { rapidAPI } from './apiClient.js';
 import { TTL } from './config.js';
 import { parseTour } from './security.js';
+import { rememberTournaments } from './d1Store.js';
 
 // Full-year tournament calendar, shared by livescore, hub, /api/calendar,
 // the cron warm, and (for in-window seasons) the player tournament maps.
@@ -44,11 +45,22 @@ export async function getCalendarYear(env, tourRaw, yearRaw, now = new Date()) {
             await cache.setEdge(TTL.edgeMiss, payload, KEY, tour, year);
             return payload;
         }
+        try {
+            await rememberTournaments(env, tour, rows, { replace: true });
+        } catch {
+            console.warn('[d1] calendar write skipped');
+        }
         await cache.set(env, CALENDAR_YEAR_TTL, payload, KEY, tour, year);
         return payload;
     } catch (err) {
         const stale = await cache.getStale(env, KEY, tour, year);
-        if (stale?.data) return stale.data;
+        if (stale?.data && typeof stale.data === 'object') {
+            return {
+                ...stale.data,
+                source: 'stale',
+                fetchedAt: stale.cachedAt || null,
+            };
+        }
         throw err;
     }
 }

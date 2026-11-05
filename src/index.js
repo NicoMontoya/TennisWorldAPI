@@ -22,7 +22,10 @@ import { handlePlayerRankHistory, seedRankSnapshots } from './routes/playerRankH
 import { getCalendarYear } from './calendarYear.js';
 import { isQuotaStop } from './quotaStop.js';
 import { LIVESCORE_FETCHED_AT_UNKNOWN, normalizeFetchedAt, takeFetchedAt } from './fetchedAt.js';
+import { readAsOf } from './asOf.js';
+import { publicErrorMessage } from './publicError.js';
 import { handleBackfillRankings, handleClearRankHistory, handleImportRankHistory, handleImportMatches } from './routes/adminBackfill.js';
+import { handleBackfillLastGood } from './routes/adminLastGood.js';
 import { handleImportOfficialDraw } from './routes/officialDrawAdmin.js';
 import { handleRankingsHistory, handleImportRankingsHistory } from './routes/rankingsHistory.js';
 import { handleSurfaceForm } from './routes/surfaceForm.js';
@@ -52,8 +55,6 @@ const GET_ROUTES = {
     '/api/player-ranking-history':      handlePlayerRankHistory,
     '/api/rankings-history':            handleRankingsHistory,
     '/api/rankings/surface-form':       handleSurfaceForm,
-    '/api/admin/backfill-rankings':     handleBackfillRankings,
-    '/api/admin/clear-rank-history':    handleClearRankHistory,
     '/api/auth/me':           handleMe,
     '/api/favorites':         handleFavorites,
     '/api/bracket/mine':      handleBracketMine,
@@ -76,6 +77,9 @@ const POST_ROUTES = {
     '/api/admin/import-vintage-rank-by-age': handleImportVintageRankByAge,
     '/api/admin/import-matches':          handleImportMatches,
     '/api/admin/import-official-draw':    handleImportOfficialDraw,
+    '/api/admin/backfill-rankings':       handleBackfillRankings,
+    '/api/admin/clear-rank-history':      handleClearRankHistory,
+    '/api/admin/backfill-last-good':      handleBackfillLastGood,
 };
 
 // Session and per-user payloads. Browsers, shared proxies, and the edge must
@@ -187,14 +191,19 @@ export default {
             // Scores polls /api/livescore and still expects data to be the match
             // array. The upstream time is a response header, not a body field.
             // The header is always set so a missing header cannot signal a stop.
+            // Last-good calendar/draws/fixtures/standings keep that same data
+            // shape and add a top-level asOf only when the copy is stored.
             const extra = livescoreFetchedAtHeaders(pathname, request, takeFetchedAt(data));
-            return jsonResponse({ ok: true, data }, 200, env, request, extra);
+            const body = { ok: true, data };
+            const asOf = readAsOf(data);
+            if (asOf) body.asOf = asOf;
+            return jsonResponse(body, 200, env, request, extra);
         } catch (err) {
-            console.error(`[${pathname}]`, err.message);
+            const message = publicErrorMessage(err);
+            console.error(`[${pathname}]`, message);
             const status = err.status || 500;
             // QuotaStopError's message is already generic. Force it anyway so a
             // remaining count or stop flag can never reach the client.
-            const message = isQuotaStop(err) ? 'Upstream request failed' : err.message;
             const extra = livescoreFetchedAtHeaders(
                 pathname,
                 request,

@@ -10,15 +10,12 @@
 // — the script posts the record.
 
 import { cache } from '../cache.js';
+import { requireAdmin } from '../adminAuth.js';
 import {
     DRAWS_CACHE_RESOURCE,
     officialDrawKvKey,
     validateOfficialRecord,
 } from '../officialDraw.js';
-
-function unauthorized() {
-    throw Object.assign(new Error('Unauthorized'), { status: 401 });
-}
 
 function badRequest(message) {
     throw Object.assign(new Error(message), { status: 400 });
@@ -34,8 +31,7 @@ async function invalidateDrawCache(env, tournamentKey, tour) {
 }
 
 export async function handleImportOfficialDraw(request, env) {
-    const secret = request.headers.get('x-admin-secret') || '';
-    if (!env.ADMIN_SECRET || secret !== env.ADMIN_SECRET) unauthorized();
+    requireAdmin(request, env);
 
     let body;
     try {
