@@ -20,9 +20,7 @@ export const DEFAULT_API_TENNIS_DAILY_CAP = 100;
 
 const FLAG_EDGE = 'https://api-tennis.internal/stop';
 const LOCAL_STOP_EDGE = 'https://api-tennis.internal/local-stop';
-const TALLY_EDGE = 'https://api-tennis.internal/call-tally';
 const FLAG_EDGE_TTL = 60;
-const TALLY_TTL = 24 * 60 * 60;
 
 let claimedUntil = 0;
 
@@ -43,10 +41,6 @@ export function apiTennisDailyCap(env) {
     const n = Number(raw);
     if (!Number.isFinite(n) || n < 0) return DEFAULT_API_TENNIS_DAILY_CAP;
     return Math.floor(n);
-}
-
-function utcDay(now = new Date()) {
-    return now.toISOString().slice(0, 10);
 }
 
 function cacheApi() {
@@ -73,36 +67,6 @@ async function edgePut(url, value, ttlSeconds) {
         },
     });
     await cache.put(url, res);
-}
-
-async function readTally() {
-    const day = utcDay();
-    try {
-        const cur = await edgeGet(TALLY_EDGE);
-        if (!cur || cur.day !== day) return { day, count: 0 };
-        const count = Number(cur.count);
-        return { day, count: Number.isFinite(count) && count > 0 ? count : 0 };
-    } catch {
-        return null;
-    }
-}
-
-/**
- * Record one API-Tennis attempt before fetch. A thrown counter read or write
- * fails closed (QuotaStopError) so the caller does not hit upstream.
- * No-op unless the stop is `on`.
- */
-export async function commitApiTennisCall(env) {
-    if (apiTennisHardStopMode(env) !== 'on') return;
-    const tally = await readTally();
-    if (!tally || tally.count >= apiTennisDailyCap(env) || !cacheApi()) {
-        throw new QuotaStopError();
-    }
-    try {
-        await edgePut(TALLY_EDGE, { day: tally.day, count: tally.count + 1 }, TALLY_TTL);
-    } catch {
-        throw new QuotaStopError();
-    }
 }
 
 async function tripLocal(ttlSec) {
@@ -154,8 +118,8 @@ export async function tripApiTennisOn429(env) {
 /**
  * true when this call must not hit api.api-tennis.com.
  * `off` is never stopped. `force` is always stopped.
- * `on` stops for a tripped flag or a full daily tally.
- * A thrown flag or tally read fails closed.
+ * `on` stops for a tripped flag. The daily cap is the shared D1 call_tally
+ * claimed in call(), not this edge cache. A thrown flag read fails closed.
  */
 export async function isApiTennisStopActive(env) {
     const mode = apiTennisHardStopMode(env);
@@ -165,14 +129,6 @@ export async function isApiTennisStopActive(env) {
     try {
         const local = await edgeGet(LOCAL_STOP_EDGE);
         if (local && Number(local.until) > Date.now()) return true;
-    } catch {
-        return true;
-    }
-
-    try {
-        const tally = await readTally();
-        if (!tally) return true;
-        if (tally.count >= apiTennisDailyCap(env)) return true;
     } catch {
         return true;
     }

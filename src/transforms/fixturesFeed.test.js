@@ -44,6 +44,7 @@ describe('normalizeFixturesFeed', () => {
             tournamentName: 'Metz',
             date: '2026-11-05',
             time: '14:30',
+            startsAtUtc: '2026-11-05T14:30:00.000Z',
             status: 'Not Started',
             round: 'Quarter-finals',
             player1Key: '2072',
@@ -72,6 +73,7 @@ describe('normalizeFixturesFeed', () => {
             round: 'Final',
             date: '2026-11-06',
             time: '18:00',
+            startsAtUtc: '2026-11-06T18:00:00.000Z',
             player1Name: 'Ada',
             player2Name: 'Bob',
         })]);

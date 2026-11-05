@@ -264,42 +264,7 @@ async function bumpCallTally() {
     await edgePut(QUOTA_CALL_TALLY_EDGE, { day, count }, secondsUntilNextUtcDay());
 }
 
-/**
- * While RAPIDAPI_HARD_STOP is on, today's edge tally blocks further calls
- * once RAPIDAPI_DAILY_CALL_CAP is reached (default 50). The block lasts until
- * the next UTC day. `off` and `force` do not consult it (`force` already
- * stopped). A tally read that throws fails closed.
- */
-export async function isRapidDailyCapReached(env) {
-    if (hardStopMode(env) !== 'on') return false;
-    const tally = await readCallTally();
-    if (!tally) return true;
-    return tally.count >= rapidDailyCallCap(env);
-}
-
-/**
- * Record one RapidAPI attempt before fetch. A thrown counter read or write
- * fails closed (QuotaStopError) so the caller does not hit upstream.
- * No-op unless the hard stop is `on` — `off` still tallies after the call.
- */
-export async function commitRapidDailyCall(env) {
-    if (hardStopMode(env) !== 'on') return;
-    const tally = await readCallTally();
-    if (!tally || tally.count >= rapidDailyCallCap(env) || !cacheApi()) {
-        throw new QuotaStopError();
-    }
-    try {
-        await edgePut(
-            QUOTA_CALL_TALLY_EDGE,
-            { day: tally.day, count: tally.count + 1 },
-            secondsUntilNextUtcDay(),
-        );
-    } catch {
-        throw new QuotaStopError();
-    }
-}
-
-/** One real upstream attempt while the hard stop is off. Edge only. */
+/** One real upstream attempt while the hard stop is off. Edge only. The on-mode cap is D1 call_tally. */
 export async function noteUpstreamCall() {
     try {
         await bumpCallTally();

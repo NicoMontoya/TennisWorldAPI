@@ -3,7 +3,7 @@ import worker from './index.js';
 import { apiTennis, rapidAPI } from './apiClient.js';
 import { createMemoryD1 } from './d1Memory.js';
 import { rememberApiTennisList, rememberDraw, rememberFixtures, rememberStandings, rememberTournaments } from './d1Store.js';
-import { QUOTA_CALL_TALLY_EDGE, resetQuotaStopStateForTests } from './quotaStop.js';
+import { resetQuotaStopStateForTests } from './quotaStop.js';
 
 const TENNIS_KEY = 'super-secret-tennis-key';
 const RAPID_KEY = 'super-secret-rapid-key';
@@ -213,7 +213,7 @@ describe('upstream key and backfill caps', () => {
         expect(first.status).toBe(200);
         expect(firstBody.data.written).toBe(1);
         expect(env.DB._tables.d1_write_ledger[0].writes).toBeGreaterThan(0);
-        const tally = JSON.parse(globalThis.caches.default._store.get(QUOTA_CALL_TALLY_EDGE).body);
+        const tally = env.DB._tables.call_tally.find(row => row.provider === 'rapidapi');
         expect(tally.count).toBe(1);
         expect(calls).toHaveLength(1);
 
@@ -253,10 +253,7 @@ describe('upstream key and backfill caps', () => {
             player1Name: 'Ada',
             player2Name: 'Bea',
         }]);
-        await globalThis.caches.default.put(QUOTA_CALL_TALLY_EDGE, new Response(
-            JSON.stringify({ day: '2000-01-01', count: 50 }),
-            { headers: { 'Content-Type': 'application/json' } },
-        ));
+        env.DB._tables.call_tally.push({ provider: 'rapidapi', utc_day: '2000-01-01', count: 50 });
         const calls = installFetch(() => jsonRes({
             data: [{ position: 1, player: { id: 1, name: 'A' } }],
         }));
@@ -270,6 +267,34 @@ describe('upstream key and backfill caps', () => {
         expect(body.data[0]).toMatchObject({ matchKey: '42', tournamentName: 'Paris' });
         expect(calls).toHaveLength(1);
         assertNoSecret(JSON.stringify(body));
+    });
+
+    it('holds RAPIDAPI_DAILY_CALL_CAP across two isolates that do not share an edge cache', async () => {
+        const db = createMemoryD1();
+        const isolateA = cacheEnv({ DB: db, RAPIDAPI_DAILY_CALL_CAP: '2' });
+        const isolateB = cacheEnv({ DB: db, RAPIDAPI_DAILY_CALL_CAP: '2' });
+        const cacheA = globalThis.caches.default;
+        const cacheB = {
+            async match() { return undefined; },
+            async put() {},
+            async delete() {},
+            _store: new Map(),
+        };
+        const calls = installFetch(() => jsonRes({
+            data: [{ position: 1, player: { id: 1, name: 'A' } }],
+        }));
+        globalThis.caches = { default: cacheA };
+        await rapidAPI.rankings(isolateA, 'ATP', 5);
+        globalThis.caches = { default: cacheB };
+        await rapidAPI.rankings(isolateB, 'ATP', 5);
+        expect(calls).toHaveLength(2);
+        expect(db._tables.call_tally.find(row => row.provider === 'rapidapi').count).toBe(2);
+
+        globalThis.caches = { default: cacheA };
+        await expect(rapidAPI.rankings(isolateA, 'ATP', 5)).rejects.toMatchObject({ name: 'QuotaStopError' });
+        globalThis.caches = { default: cacheB };
+        await expect(rapidAPI.rankings(isolateB, 'ATP', 5)).rejects.toMatchObject({ name: 'QuotaStopError' });
+        expect(calls).toHaveLength(2);
     });
 
     it('fails closed when a daily call counter read or write throws, and serves D1', async () => {
@@ -290,18 +315,24 @@ describe('upstream key and backfill caps', () => {
                 name: 'Madrid',
             }]);
         }
-        function breakCounter(which) {
-            const cache = globalThis.caches.default;
-            const match = cache.match.bind(cache);
-            const put = cache.put.bind(cache);
-            const isTally = (req) => String(req?.url || req).includes('call-tally');
-            cache.match = async (req) => {
-                if (which === 'read' && isTally(req)) throw new Error('tally read failed');
-                return match(req);
-            };
-            cache.put = async (req, res) => {
-                if (which === 'write' && isTally(req)) throw new Error('tally write failed');
-                return put(req, res);
+        function breakCounter(env, which) {
+            const db = env.DB;
+            const prepare = db.prepare.bind(db);
+            db.prepare = (sql) => {
+                if (!String(sql).includes('call_tally')) return prepare(sql);
+                const stmt = {
+                    bind() { return stmt; },
+                    async all() {
+                        if (which === 'throw') throw new Error('call_tally failed');
+                        return { results: [] };
+                    },
+                    async run() {
+                        if (which === 'throw') throw new Error('call_tally failed');
+                        return { meta: { changes: 0 } };
+                    },
+                    async first() { return null; },
+                };
+                return stmt;
             };
         }
         async function expectStored(env, path, needle) {
@@ -315,10 +346,10 @@ describe('upstream key and backfill caps', () => {
             assertNoSecret(logs.join('\n'));
         }
 
-        for (const which of ['read', 'write']) {
+        for (const which of ['throw', 'empty']) {
             const env = cacheEnv({ RAPIDAPI_DAILY_CALL_CAP: '50', API_TENNIS_DAILY_CAP: '100' });
             await seed(env);
-            breakCounter(which);
+            breakCounter(env, which);
             const calls = installFetch(() => { throw new Error('fetch must not be called'); });
             await expectStored(env, '/api/fixtures?tour=ATP', 'Paris');
             await expectStored(env, '/api/tournaments?tour=ATP', 'Madrid');

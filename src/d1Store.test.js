@@ -53,13 +53,27 @@ describe('D1 write budget', () => {
     it('upserts the same matchKey instead of inserting a second row', async () => {
         const env = envWith(10);
         await rememberFixtures(env, 'ATP', [
-            { matchKey: '7', tournamentKey: '1', date: '2026-11-05', player1Name: 'Old' },
+            {
+                matchKey: '7',
+                tournamentKey: '1',
+                date: '2026-11-05',
+                time: '14:30',
+                startsAtUtc: '2026-11-05T14:30:00.000Z',
+                player1Name: 'Old',
+            },
         ]);
         await rememberFixtures(env, 'ATP', [
-            { matchKey: '7', tournamentKey: '1', date: '2026-11-05', player1Name: 'New' },
+            {
+                matchKey: '7',
+                tournamentKey: '1',
+                date: '2026-11-05',
+                startsAtUtc: '2026-11-05T14:30:00.000Z',
+                player1Name: 'New',
+            },
         ]);
         expect(env.DB._tables.fixtures).toHaveLength(1);
         const saved = await readFixtures(env, { tour: 'ATP' });
         expect(saved.rows[0].player1Name).toBe('New');
+        expect(env.DB._tables.fixtures[0].starts_at_utc).toBe('2026-11-05T14:30:00.000Z');
     });
 });

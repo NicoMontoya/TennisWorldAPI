@@ -16,12 +16,22 @@ export function unwrapFixtureList(raw) {
 }
 
 function splitDateTime(value) {
-    if (value == null || value === '') return { date: '', time: '' };
+    if (value == null || value === '') return { date: '', time: '', startsAtUtc: '' };
     const text = String(value).trim();
     const iso = text.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/);
-    if (iso) return { date: iso[1], time: iso[2] };
-    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return { date: text, time: '' };
-    return { date: '', time: '' };
+    const date = iso ? iso[1] : (/^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '');
+    const time = iso ? iso[2] : '';
+    return { date, time, startsAtUtc: toUtcTimestamp(text) };
+}
+
+// Full upstream instant, ISO 8601 with Z. A date-only value has no clock, so
+// startsAtUtc stays empty rather than inventing midnight.
+function toUtcTimestamp(text) {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)) return '';
+    const zoned = /Z$|[+-]\d{2}:\d{2}$/.test(text) ? text : `${text}Z`;
+    const ms = Date.parse(zoned);
+    if (!Number.isFinite(ms)) return '';
+    return new Date(ms).toISOString();
 }
 
 function roundLabel(row) {
@@ -54,6 +64,7 @@ function mapRapidFixture(row, fallback) {
         tournamentName,
         date: when.date,
         time: when.time,
+        startsAtUtc: when.startsAtUtc,
         status: 'Not Started',
         round: roundLabel(row),
         season: when.date ? when.date.slice(0, 4) : '',

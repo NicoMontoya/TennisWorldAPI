@@ -130,12 +130,13 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
   2xx with a valid remaining count. Header-less non-2xx responses do not trip
   and do not change the streak. 429 always trips. Every fetch that is actually
   sent, including 5xx, increments a separate edge call tally. While `on`,
-  `RAPIDAPI_DAILY_CALL_CAP` (wrangler var, default 50) is that tally's UTC-day
-  ceiling. RapidAPI bills overage per call — September 2026 was a $167 overage —
-  and the plan quota resets on the 16th of each month. At the cap, calendar,
-  draws, fixtures, and standings serve the last D1 copy and do not call
-  RapidAPI again until the next UTC day. Backfill counts against this cap and
-  against `D1_DAILY_WRITE_BUDGET`. `off` never
+  `RAPIDAPI_DAILY_CALL_CAP` (wrangler var, default 50) is a global D1 counter
+  (`call_tally`), not a per-colo cache entry. RapidAPI bills overage per call —
+  September 2026 was a $167 overage — and the plan quota resets on the 16th of
+  each month. At the cap, or if that claim cannot be written, calendar, draws,
+  fixtures, and standings serve the last D1 copy and do not call RapidAPI again
+  until the next UTC day. Backfill counts against this cap and against
+  `D1_DAILY_WRITE_BUDGET`. `off` never
   stops. `force` stops immediately, before any fetch. Unset is `off`. Only the exact strings `off`, `on`, and
   `force` are recognized; any other present value (blank, different case,
   trailing space, typo) acts as `on`. There is no route to change it. The

@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS fixtures (
     match_key TEXT NOT NULL,
     tournament_key TEXT NOT NULL DEFAULT '',
     match_date TEXT NOT NULL DEFAULT '',
+    -- Full upstream start instant (ISO 8601, Z). date/time stay the split fields.
+    starts_at_utc TEXT NOT NULL DEFAULT '',
     payload TEXT NOT NULL,
     fetched_at TEXT NOT NULL,
     PRIMARY KEY (tour, match_key)
@@ -54,6 +56,16 @@ CREATE TABLE IF NOT EXISTS standings (
 CREATE TABLE IF NOT EXISTS d1_write_ledger (
     day TEXT PRIMARY KEY,
     writes INTEGER NOT NULL
+);
+
+-- Global daily upstream call cap. One row per provider per UTC day.
+-- Claim with a single INSERT ... ON CONFLICT DO UPDATE ... WHERE count < cap RETURNING.
+-- Not KV: KV is eventually consistent and last-write-wins, so parallel calls overshoot.
+CREATE TABLE IF NOT EXISTS call_tally (
+    provider TEXT NOT NULL,
+    utc_day TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    PRIMARY KEY (provider, utc_day)
 );
 
 -- API-Tennis.com list rows (tournaments). Separate from the RapidAPI calendar

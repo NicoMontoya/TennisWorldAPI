@@ -18,11 +18,12 @@ binding = "TENNIS_CACHE"
 id      = "71f4016e2aa14b9c8bba916d05086fe1"
 
 # ── D1 last-good store ─────────────────────────────────────────────────────────
-# Nico creates the database and applies the migration. Do not invent an id.
+# Do NOT deploy while database_id is the placeholder below.
 #   npx wrangler d1 create tennisworld
-#   paste the database_id below (replace the placeholder)
+#   paste the printed database_id over the placeholder
 #   npx wrangler d1 migrations apply tennisworld --local
 #   npx wrangler d1 migrations apply tennisworld --remote
+# Only then deploy. A deploy before that has no D1 and the daily caps fail closed.
 # fixtures (tour, match_key) is the key a later picks table should reference.
 [[d1_databases]]
 binding = "DB"
@@ -56,12 +57,14 @@ RAPIDAPI_HARD_STOP = "on"
 # API_TENNIS_DAILY_CAP is the per-location UTC-day call cap while the stop is on.
 API_TENNIS_HARD_STOP = "on"
 API_TENNIS_DAILY_CAP = "100"
-# Per-location UTC-day cap on RapidAPI calls while RAPIDAPI_HARD_STOP is on.
-# Overage is billed per call (September 2026 was a $167 overage). The plan
-# quota resets on the 16th of each month. 50/day stays inside a normal month.
-# When the cap is hit, routes serve the last D1 copy and do not call RapidAPI
-# again until the next UTC day. Unset uses the same default of 50.
-# Backfill counts against this cap and against D1_DAILY_WRITE_BUDGET.
+# Global UTC-day cap on RapidAPI calls while RAPIDAPI_HARD_STOP is on.
+# The counter is D1 call_tally, shared across colos. Not KV (last-write-wins
+# would let parallel calls overshoot). Overage is billed per call (September
+# 2026 was a $167 overage). The plan quota resets on the 16th. 50/day stays
+# inside a normal month. At the cap, or if the claim statement throws, routes
+# serve the last D1 copy and do not call RapidAPI until the next UTC day.
+# Unset uses the same default of 50. Backfill counts against this cap and
+# against D1_DAILY_WRITE_BUDGET.
 RAPIDAPI_DAILY_CALL_CAP = "50"
 # Daily cap on D1 row upserts (live pulls and backfill). Unset uses 20000.
 # 0 blocks new writes; reads of rows already stored still serve.

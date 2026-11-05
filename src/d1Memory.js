@@ -1,6 +1,6 @@
 // In-memory D1 double for tests. Understands the statements d1Store.js sends.
 
-const TABLES = ['tournaments', 'draws', 'fixtures', 'standings', 'd1_write_ledger', 'api_tennis_lists'];
+const TABLES = ['tournaments', 'draws', 'fixtures', 'standings', 'd1_write_ledger', 'api_tennis_lists', 'call_tally'];
 const PK = {
     tournaments: ['tour', 'tournament_key'],
     draws: ['tour', 'tournament_key'],
@@ -8,7 +8,25 @@ const PK = {
     standings: ['tour', 'player_key'],
     d1_write_ledger: ['day'],
     api_tennis_lists: ['resource', 'tour', 'natural_key'],
+    call_tally: ['provider', 'utc_day'],
 };
+
+function claimCallTally(tables, args) {
+    const [provider, day, capInsert, capUpdate] = args;
+    const cap = Number(capUpdate);
+    let row = tables.call_tally.find(item => item.provider === provider && item.utc_day === day);
+    if (!row) {
+        if (!(Number(capInsert) > 0)) return [];
+        row = { provider, utc_day: day, count: 1 };
+        tables.call_tally.push(row);
+        return [{ count: 1 }];
+    }
+    if (row.count < cap) {
+        row.count += 1;
+        return [{ count: row.count }];
+    }
+    return [];
+}
 
 function normalize(sql) {
     return String(sql).replace(/\s+/g, ' ').trim();
@@ -95,6 +113,9 @@ export function createMemoryD1() {
                 return exec(text, args);
             },
             async all() {
+                if (text.includes('INSERT INTO call_tally')) {
+                    return { results: claimCallTally(tables, args) };
+                }
                 return { results: query(text, args) };
             },
             async first() {

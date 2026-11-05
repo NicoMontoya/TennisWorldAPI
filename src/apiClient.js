@@ -25,18 +25,18 @@ import { unwrapLiveEvents } from './transforms/matchstatLive.js';
 import {
     isHardStopActive,
     isQuotaStop,
-    isRapidDailyCapReached,
-    commitRapidDailyCall,
     noteRapidQuota,
     noteUpstreamCall,
     hardStopMode,
+    rapidDailyCallCap,
     QuotaStopError,
 } from './quotaStop.js';
+import { claimCallSlot } from './callTally.js';
 import {
     isApiTennisStopActive,
-    commitApiTennisCall,
     tripApiTennisOn429,
     apiTennisHardStopMode,
+    apiTennisDailyCap,
     apiTennisStopped,
 } from './apiTennisStop.js';
 
@@ -88,7 +88,9 @@ function sleep(ms) {
 async function fetchWithRetry(urlStr, env, attempt = 1) {
     // Count this attempt before fetch. A thrown counter read/write must not
     // reach the network. QuotaStopError is not retried.
-    if (apiTennisHardStopMode(env) === 'on') await commitApiTennisCall(env);
+    if (apiTennisHardStopMode(env) === 'on') {
+        await claimCallSlot(env, 'api-tennis', apiTennisDailyCap(env));
+    }
     let res;
     try {
         res = await fetch(urlStr);
@@ -189,14 +191,14 @@ function scrubUpstreamError(err, env) {
 
 async function rapidFetch(env, path) {
     // Every RapidAPI caller comes through here. A hard stop throws before fetch.
-    if (await isHardStopActive(env) || await isRapidDailyCapReached(env)) {
+    if (await isHardStopActive(env)) {
         console.warn('[quota] hard stop active');
         throw new QuotaStopError();
     }
-    // Cap is on: persist the tally first. A thrown write does not fetch.
+    // Global D1 cap. No row, or a thrown claim, means do not fetch.
     if (hardStopMode(env) === 'on') {
         try {
-            await commitRapidDailyCall(env);
+            await claimCallSlot(env, 'rapidapi', rapidDailyCallCap(env));
         } catch (err) {
             console.warn('[quota] hard stop active');
             if (isQuotaStop(err)) throw err;
@@ -220,7 +222,7 @@ async function rapidFetch(env, path) {
         });
     } catch {
         // The attempt left the isolate. When the cap is off, count it here.
-        // When the cap is on, commitRapidDailyCall already recorded it.
+        // When the cap is on, claimCallSlot already recorded it.
         if (hardStopMode(env) !== 'on') {
             try { await noteUpstreamCall(); } catch { /* off mode tally is best-effort */ }
         }

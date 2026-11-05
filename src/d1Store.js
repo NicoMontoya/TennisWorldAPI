@@ -19,11 +19,12 @@ const INSERT = {
         ON CONFLICT(tour, tournament_key) DO UPDATE SET
             payload = excluded.payload,
             fetched_at = excluded.fetched_at`,
-    fixtures: `INSERT INTO fixtures (tour, match_key, tournament_key, match_date, payload, fetched_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+    fixtures: `INSERT INTO fixtures (tour, match_key, tournament_key, match_date, starts_at_utc, payload, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(tour, match_key) DO UPDATE SET
             tournament_key = excluded.tournament_key,
             match_date = excluded.match_date,
+            starts_at_utc = excluded.starts_at_utc,
             payload = excluded.payload,
             fetched_at = excluded.fetched_at`,
     standings: `INSERT INTO standings (tour, player_key, payload, fetched_at)
@@ -41,7 +42,7 @@ const INSERT = {
 const INSERT_BINDS = {
     tournaments: row => [row.tour, row.tournament_key, row.payload, row.fetched_at],
     draws: row => [row.tour, row.tournament_key, row.payload, row.fetched_at],
-    fixtures: row => [row.tour, row.match_key, row.tournament_key, row.match_date, row.payload, row.fetched_at],
+    fixtures: row => [row.tour, row.match_key, row.tournament_key, row.match_date, row.starts_at_utc, row.payload, row.fetched_at],
     standings: row => [row.tour, row.player_key, row.payload, row.fetched_at],
     api_tennis_lists: row => [row.resource, row.tour, row.natural_key, row.payload, row.fetched_at],
 };
@@ -251,6 +252,7 @@ export async function rememberFixtures(env, tour, fixtures) {
             match_key: String(fixture.matchKey),
             tournament_key: String(fixture.tournamentKey || ''),
             match_date: String(fixture.date || ''),
+            starts_at_utc: String(fixture.startsAtUtc || ''),
             payload: JSON.stringify(fixture),
             fetched_at: fetchedAt,
         });
