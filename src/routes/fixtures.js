@@ -50,7 +50,8 @@ export async function handleFixtures(request, env) {
     const dateStart = parseDay(searchParams.get('dateStart'));
     const dateStop = parseDay(searchParams.get('dateStop'));
 
-    const cacheKey = ['fixtures3', tour, tournamentKey || 'all', dateStart || '', dateStop || ''];
+    const cacheKey = ['fixtures4', tour, tournamentKey || 'all', dateStart || '', dateStop || ''];
+    const query = { tour, tournamentKey, dateStart, dateStop };
 
     let cached = null;
     try {
@@ -60,16 +61,27 @@ export async function handleFixtures(request, env) {
     }
     if (cached && Array.isArray(cached.data)) {
         const live = cached.data.filter(row => row?.matchKey);
-        if (live.length || cached.data.length === 0) return live;
+        if (live.length) return live;
+        // Short-TTL empty. Do not pay for another pull until it expires,
+        // and do not hide D1 last-good behind that [].
+        if (cached.data.length === 0) return serveStoredFixtures(env, cacheKey, query);
     }
 
-    const query = { tour, tournamentKey, dateStart, dateStop };
     try {
         const raw = await pullFixtures(env, query);
         const data = normalizeFixturesFeed(raw, { tour, tournamentKey });
-        try { await rememberFixtures(env, tour, data); } catch { /* last-good is best-effort */ }
-        try { await cache.set(env, TTL.fixtures, data, ...cacheKey); } catch { /* cache is fail-soft */ }
-        return data;
+        const live = data.filter(row => row?.matchKey);
+        if (!live.length) {
+            // Cache the miss briefly. skipStale keeps a previous no-expiry
+            // backup; rememberFixtures must not replace saved rows with [].
+            try {
+                await cache.set(env, TTL.fixturesEmpty, [], ...cacheKey, { skipStale: true });
+            } catch { /* cache is fail-soft */ }
+            return serveStoredFixtures(env, cacheKey, query);
+        }
+        try { await rememberFixtures(env, tour, live); } catch { /* last-good is best-effort */ }
+        try { await cache.set(env, TTL.fixtures, live, ...cacheKey); } catch { /* cache is fail-soft */ }
+        return live;
     } catch {
         return serveStoredFixtures(env, cacheKey, query);
     }
