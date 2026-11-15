@@ -82,6 +82,18 @@ const POST_ROUTES = {
     '/api/admin/backfill-last-good':      handleBackfillLastGood,
 };
 
+// Sprint 1 shell. The client router pushStates these paths. /rankings is an
+// existing page served by the assets binding and is not rewritten here.
+const SPRINT1_PATHS = new Set(['/today', '/schedule', '/picks', '/me']);
+
+export function sprint1ShellPath(pathname) {
+    if (typeof pathname !== 'string' || pathname.includes('//')) return null;
+    const bare = pathname.length > 1 && pathname.endsWith('/')
+        ? pathname.slice(0, -1)
+        : pathname;
+    return SPRINT1_PATHS.has(bare) ? bare : null;
+}
+
 // Session and per-user payloads. Browsers, shared proxies, and the edge must
 // not store these. Public routes are absent on purpose and keep their headers.
 const PRIVATE_NO_STORE = new Set([
@@ -178,6 +190,10 @@ export default {
             return new Response(null, { status: 204, headers: corsHeaders(env, request) });
         }
 
+        if (request.method === 'GET' && sprint1ShellPath(pathname)) {
+            return serveSprint1Shell(request, env, pathname);
+        }
+
         let handler;
         if (request.method === 'GET')  handler = GET_ROUTES[pathname];
         if (request.method === 'POST') handler = POST_ROUTES[pathname];
@@ -235,6 +251,62 @@ function livescoreFetchedAtHeaders(pathname, request, fetchedAt) {
         headers['Access-Control-Expose-Headers'] = 'X-Fetched-At';
     }
     return headers;
+}
+
+const SHELL_REDIRECT = new Set([301, 302, 303, 307, 308]);
+
+// html_handling may 307 /sprint1.html → /sprint1. Follow that once on the
+// server so the browser stays on /today (or /schedule, /picks, /me).
+function shellAssetLocation(location, base) {
+    if (!location || typeof location !== 'string') return null;
+    let url;
+    try { url = new URL(location, base); } catch { return null; }
+    let baseUrl;
+    try { baseUrl = new URL(base); } catch { return null; }
+    if (url.origin !== baseUrl.origin) return null;
+    const path = url.pathname.replace(/\/+$/, '') || '/';
+    if (path !== '/sprint1') return null;
+    return url.toString();
+}
+
+async function fetchSprint1Asset(assets, pageUrl) {
+    const origin = new URL(pageUrl).origin;
+    const htmlUrl = `${origin}/sprint1.html`;
+    const first = await assets.fetch(new Request(htmlUrl, { method: 'GET' }));
+    if (!SHELL_REDIRECT.has(first.status)) return first;
+    const next = shellAssetLocation(first.headers.get('Location'), htmlUrl);
+    if (!next) return first;
+    return assets.fetch(new Request(next, { method: 'GET' }));
+}
+
+async function serveSprint1Shell(request, env, pathname) {
+    const assets = env?.ASSETS;
+    if (!assets || typeof assets.fetch !== 'function') {
+        return jsonResponse({ error: `Unknown route: ${pathname}` }, 404, env, request);
+    }
+
+    let asset;
+    try {
+        asset = await fetchSprint1Asset(assets, request.url);
+    } catch {
+        return jsonResponse({ error: `Unknown route: ${pathname}` }, 404, env, request);
+    }
+    // Never hand the html_handling redirect to the browser.
+    if (SHELL_REDIRECT.has(asset.status)) {
+        return jsonResponse({ error: `Unknown route: ${pathname}` }, 404, env, request);
+    }
+
+    const headers = new Headers(asset.headers);
+    headers.delete('Location');
+    if (!headers.has('X-Robots-Tag')) headers.set('X-Robots-Tag', 'noindex');
+    if (!headers.get('Content-Type')?.toLowerCase().includes('html')) {
+        headers.set('Content-Type', 'text/html; charset=utf-8');
+    }
+    return new Response(asset.body, {
+        status: asset.status,
+        statusText: asset.statusText,
+        headers,
+    });
 }
 
 function jsonResponse(body, status, env, request, extraHeaders) {
