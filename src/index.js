@@ -82,6 +82,18 @@ const POST_ROUTES = {
     '/api/admin/backfill-last-good':      handleBackfillLastGood,
 };
 
+// Sprint 1 shell. The client router pushStates these paths. /rankings is an
+// existing page served by the assets binding and is not rewritten here.
+const SPRINT1_PATHS = new Set(['/today', '/schedule', '/picks', '/me']);
+
+export function sprint1ShellPath(pathname) {
+    if (typeof pathname !== 'string' || pathname.includes('//')) return null;
+    const bare = pathname.length > 1 && pathname.endsWith('/')
+        ? pathname.slice(0, -1)
+        : pathname;
+    return SPRINT1_PATHS.has(bare) ? bare : null;
+}
+
 // Session and per-user payloads. Browsers, shared proxies, and the edge must
 // not store these. Public routes are absent on purpose and keep their headers.
 const PRIVATE_NO_STORE = new Set([
@@ -178,6 +190,10 @@ export default {
             return new Response(null, { status: 204, headers: corsHeaders(env, request) });
         }
 
+        if (request.method === 'GET' && sprint1ShellPath(pathname)) {
+            return serveSprint1Shell(request, env, pathname);
+        }
+
         let handler;
         if (request.method === 'GET')  handler = GET_ROUTES[pathname];
         if (request.method === 'POST') handler = POST_ROUTES[pathname];
@@ -235,6 +251,34 @@ function livescoreFetchedAtHeaders(pathname, request, fetchedAt) {
         headers['Access-Control-Expose-Headers'] = 'X-Fetched-At';
     }
     return headers;
+}
+
+async function serveSprint1Shell(request, env, pathname) {
+    const assets = env?.ASSETS;
+    if (!assets || typeof assets.fetch !== 'function') {
+        return jsonResponse({ error: `Unknown route: ${pathname}` }, 404, env, request);
+    }
+
+    const assetUrl = new URL(request.url);
+    assetUrl.pathname = '/sprint1.html';
+    assetUrl.search = '';
+    let asset;
+    try {
+        asset = await assets.fetch(new Request(assetUrl.toString(), { method: 'GET' }));
+    } catch {
+        return jsonResponse({ error: `Unknown route: ${pathname}` }, 404, env, request);
+    }
+
+    const headers = new Headers(asset.headers);
+    if (!headers.has('X-Robots-Tag')) headers.set('X-Robots-Tag', 'noindex');
+    if (!headers.get('Content-Type')?.toLowerCase().includes('html')) {
+        headers.set('Content-Type', 'text/html; charset=utf-8');
+    }
+    return new Response(asset.body, {
+        status: asset.status,
+        statusText: asset.statusText,
+        headers,
+    });
 }
 
 function jsonResponse(body, status, env, request, extraHeaders) {

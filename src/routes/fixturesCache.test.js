@@ -102,7 +102,7 @@ describe('fixtures empty cache', () => {
         const env = cacheEnv();
         // Stuck 24h empty entry under the previous prefix must be ignored.
         await env.TENNIS_CACHE.put(
-            'tw:fixtures3:ATP:21362::',
+            'tw:fixtures4:ATP:21362::',
             JSON.stringify({ data: [], cachedAt: START.toISOString(), stale: false }),
         );
         env.TENNIS_CACHE.puts.length = 0;
@@ -130,11 +130,11 @@ describe('fixtures empty cache', () => {
         expect(calls).toHaveLength(2);
         expect(rapidTally(env)[0].count).toBe(2);
 
-        const fresh = env.TENNIS_CACHE.puts.filter(put => put.key.startsWith('tw:fixtures4:'));
+        const fresh = env.TENNIS_CACHE.puts.filter(put => put.key.startsWith('tw:fixtures5:'));
         expect(fresh.length).toBeGreaterThan(0);
         expect(fresh.every(put => put.opts?.expirationTtl === TTL.fixturesEmpty)).toBe(true);
         expect(fresh.every(put => put.opts?.expirationTtl === 60)).toBe(true);
-        expect(env.TENNIS_CACHE.puts.some(put => String(put.key).includes('fixtures3'))).toBe(false);
+        expect(env.TENNIS_CACHE.puts.some(put => String(put.key).includes('fixtures4'))).toBe(false);
         expect(env.TENNIS_CACHE.puts.some(put => String(put.key).endsWith(':stale'))).toBe(false);
     });
 
@@ -213,7 +213,7 @@ describe('fixtures empty cache', () => {
         expect((await getBoard(env)).data[0].matchKey).toBe('88001');
         expect(calls).toHaveLength(2);
 
-        const primary = env.TENNIS_CACHE.puts.filter(put => put.key === 'tw:fixtures4:ATP:21362::');
+        const primary = env.TENNIS_CACHE.puts.filter(put => put.key === 'tw:fixtures5:ATP:21362::');
         expect(primary.length).toBeGreaterThan(0);
         expect(primary.every(put => put.opts?.expirationTtl === TTL.fixtures)).toBe(true);
         expect(primary.every(put => put.opts?.expirationTtl === 24 * 60 * 60)).toBe(true);

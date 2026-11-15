@@ -3,11 +3,19 @@ import { rapidAPI } from '../apiClient.js';
 import { TTL } from '../config.js';
 import { parseTour, parseTournamentKey } from '../security.js';
 import { normalizeFixturesFeed } from '../transforms/fixturesFeed.js';
+import { dedupeFixtures, orderFixturesByTier, selectTourTarget } from '../transforms/fixtureTier.js';
 import { tagAsOf } from '../asOf.js';
-import { readFixtures, rememberFixtures } from '../d1Store.js';
+import { readFixtures, readTournaments, rememberFixtures } from '../d1Store.js';
 
-const MAX_PAGES = 2;
+// Two upstream calls, same as before. The first is a tournament-specific
+// fixtures read when a live/upcoming tour event is already in D1 or the
+// calendar-year cache (no calendar fetch). The remaining call is one page of
+// the general feed. With no stored tour event, both calls stay on the general
+// feed. Never a third page, and both calls still go through rapidFetch
+// (claimCallSlot + hard stop).
+const MAX_CALLS = 2;
 const PAGE_SIZE = 100;
+const CALENDAR_KEY = 'calendar-year';
 
 function httpError(status, message) {
     throw Object.assign(new Error(message), { status });
@@ -22,22 +30,74 @@ function parseDay(raw) {
     return day;
 }
 
-async function pullFixtures(env, { tour, tournamentKey, dateStart, dateStop }) {
-    if (tournamentKey) {
-        return rapidAPI.tournamentFixtures(env, tour, tournamentKey);
+function calendarItems(cached) {
+    const data = cached?.data;
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.data)) return data.data;
+    return [];
+}
+
+// Calendar rows already on hand. Does not call RapidAPI.
+async function storedCalendarItems(env, tour) {
+    const items = [];
+    try {
+        const saved = await readTournaments(env, tour);
+        if (Array.isArray(saved?.rows)) items.push(...saved.rows);
+    } catch { /* D1 miss is not a reason to fetch */ }
+
+    const year = new Date().getUTCFullYear();
+    for (const y of [year - 1, year, year + 1]) {
+        const key = [CALENDAR_KEY, tour, String(y)];
+        try {
+            items.push(...calendarItems(await cache.get(env, ...key)));
+        } catch { /* cache miss */ }
+        try {
+            items.push(...calendarItems(await cache.getStale(env, ...key)));
+        } catch { /* no stale copy */ }
     }
-    const rows = [];
-    let envelope = { data: rows };
-    for (let pageNo = 1; pageNo <= MAX_PAGES; pageNo++) {
+    return items;
+}
+
+function rowInRange(row, { dateStart, dateStop }) {
+    const date = row?.date || '';
+    if (!date) return true;
+    if (dateStart && date < dateStart) return false;
+    if (dateStop && date > dateStop) return false;
+    return true;
+}
+
+async function pullFixtures(env, query) {
+    const { tour, tournamentKey, dateStart, dateStop } = query;
+    if (tournamentKey) {
+        const raw = await rapidAPI.tournamentFixtures(env, tour, tournamentKey);
+        return orderFixturesByTier(normalizeFixturesFeed(raw, query));
+    }
+
+    const parts = [];
+    let calls = 0;
+    const target = selectTourTarget(await storedCalendarItems(env, tour), new Date(), query);
+    if (target && calls < MAX_CALLS) {
+        calls += 1;
+        const raw = await rapidAPI.tournamentFixtures(env, tour, target.id);
+        const targeted = normalizeFixturesFeed(raw, {
+            tour,
+            tournamentKey: target.id,
+            tournamentName: target.name,
+        }).filter(row => rowInRange(row, query));
+        parts.push(...targeted);
+    }
+
+    for (let pageNo = 1; calls < MAX_CALLS; pageNo++) {
+        calls += 1;
         const json = await rapidAPI.fixturesFeed(env, tour, {
             dateStart, dateStop, pageNo, pageSize: PAGE_SIZE,
         });
         const page = Array.isArray(json?.data) ? json.data : [];
-        rows.push(...page);
-        envelope = json || envelope;
+        parts.push(...normalizeFixturesFeed({ data: page }, { tour }));
         if (!page.length || json?.hasNextPage === false || page.length < PAGE_SIZE) break;
     }
-    return { ...envelope, data: rows };
+
+    return orderFixturesByTier(dedupeFixtures(parts));
 }
 
 // GET /api/fixtures?tour=ATP|WTA&dateStart=YYYY-MM-DD&dateStop=YYYY-MM-DD&tournamentKey=123
@@ -50,7 +110,9 @@ export async function handleFixtures(request, env) {
     const dateStart = parseDay(searchParams.get('dateStart'));
     const dateStop = parseDay(searchParams.get('dateStop'));
 
-    const cacheKey = ['fixtures4', tour, tournamentKey || 'all', dateStart || '', dateStop || ''];
+    // fixtures5: rows carry `tier` and tour events are requested before the
+    // general feed, so a fixtures4 entry is the previous order.
+    const cacheKey = ['fixtures5', tour, tournamentKey || 'all', dateStart || '', dateStop || ''];
     const query = { tour, tournamentKey, dateStart, dateStop };
 
     let cached = null;
@@ -68,8 +130,7 @@ export async function handleFixtures(request, env) {
     }
 
     try {
-        const raw = await pullFixtures(env, query);
-        const data = normalizeFixturesFeed(raw, { tour, tournamentKey });
+        const data = await pullFixtures(env, query);
         const live = data.filter(row => row?.matchKey);
         if (!live.length) {
             // Cache the miss briefly. skipStale keeps a previous no-expiry
@@ -93,12 +154,12 @@ async function serveStoredFixtures(env, cacheKey, query) {
         ...query,
         upcomingFrom: query.dateStart || query.dateStop || query.tournamentKey ? undefined : today,
     });
-    if (saved?.hadRows) return tagAsOf(saved.rows, saved.asOf);
+    if (saved?.hadRows) return tagAsOf(orderFixturesByTier(saved.rows), saved.asOf);
 
     try {
         const stale = await cache.getStale(env, ...cacheKey);
         const rows = Array.isArray(stale?.data) ? stale.data.filter(row => row?.matchKey) : [];
-        if (rows.length) return tagAsOf(rows, stale.cachedAt || stale.fetchedAt);
+        if (rows.length) return tagAsOf(orderFixturesByTier(rows), stale.cachedAt || stale.fetchedAt);
     } catch { /* KV miss is an empty board */ }
 
     return [];

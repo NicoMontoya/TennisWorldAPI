@@ -7,6 +7,7 @@
 
 import { ROUND_NAME } from './matchstatLive.js';
 import { transformFixtures } from './index.js';
+import { fixtureTier } from './fixtureTier.js';
 
 export function unwrapFixtureList(raw) {
     if (Array.isArray(raw)) return raw;
@@ -58,6 +59,14 @@ function mapRapidFixture(row, fallback) {
         row?.tournament?.name ?? fallback.tournamentName ?? '',
     ).trim();
     const tour = fallback.tour || '';
+    const tier = fixtureTier({
+        tournamentName,
+        rankName: row?.tournament?.rank?.name || row?.tournament?.tier || '',
+        rankId: row?.tournament?.rankId ?? row?.tournament?.rank?.id,
+        // Upstream level only. `${tour} Singles` is a category we add below,
+        // not evidence that the event is tour-level.
+        eventType: row?.tourType || row?.event_type_type || '',
+    });
     return {
         matchKey,
         tournamentKey,
@@ -69,6 +78,7 @@ function mapRapidFixture(row, fallback) {
         round: roundLabel(row),
         season: when.date ? when.date.slice(0, 4) : '',
         eventType: tour ? `${tour} Singles` : '',
+        tier,
         player1Key: String(row?.player1Id ?? row?.player1?.id ?? ''),
         player1Name: row?.player1?.name || '',
         player1Logo: '',
@@ -90,7 +100,15 @@ export function normalizeFixturesFeed(raw, fallback = {}) {
     for (const row of unwrapFixtureList(raw)) {
         let mapped;
         if (isRapidFixture(row)) mapped = mapRapidFixture(row, fallback);
-        else mapped = transformFixtures([row])[0];
+        else {
+            mapped = transformFixtures([row])[0];
+            if (mapped) {
+                mapped.tier = fixtureTier({
+                    tournamentName: mapped.tournamentName,
+                    eventType: mapped.eventType,
+                });
+            }
+        }
         if (mapped?.matchKey) out.push(mapped);
     }
     return out;
