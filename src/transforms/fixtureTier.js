@@ -36,9 +36,10 @@ const TOUR_NAME = /\bgrand slam\b|\baustralian open\b|\broland garros\b|\bfrench
 
 const TIER_SORT = { tour: 0, challenger: 1, itf: 2 };
 const DAY_MS = 86_400_000;
-// A stored calendar row is "current" when it is already underway (started
-// within the last 14 days) or starts within the next 21 days.
-const LIVE_LOOKBACK_DAYS = 14;
+// Slams run two weeks. A 250/500/Masters that started more than ~8 days ago
+// is over even when a coarse calendar status still says "live".
+const SLAM_LOOKBACK_DAYS = 14;
+const TOUR_LOOKBACK_DAYS = 8;
 const UPCOMING_DAYS = 21;
 
 function levelText({ tournamentName, rankName, eventType }) {
@@ -99,6 +100,18 @@ function eventStartMs(item) {
     return Number.isFinite(ms) ? ms : NaN;
 }
 
+function isFinishedEvent(item) {
+    const finished = item?.finished;
+    if (finished === true || finished === 1 || finished === '1') return true;
+    const status = String(item?.status || '').trim().toLowerCase();
+    return status === 'finished' || status === 'completed' || status === 'complete';
+}
+
+function isSlamEvent(name, rankName, rankId) {
+    if (Number(rankId) === 4) return true;
+    return /\bgrand slam\b|\bwimbledon\b|\broland garros\b|\baustralian open\b|\bfrench open\b|\bu\.?s\.?\s+open\b/i.test(`${name} ${rankName}`);
+}
+
 function targetRank(item) {
     const name = `${item.name || ''} ${item.tier || ''}`;
     const team = /\bunited cup\b|\bdavis\b|\bbillie jean\b|\bbjk\b/i.test(name);
@@ -125,12 +138,13 @@ function overlapsQuery(startMs, query) {
 /**
  * One live/upcoming tour event to spend the first fixtures call on.
  * Finals beat a Slam, Masters, 500, team event, or 250 happening in the
- * same window. Items outside the window, lower tiers, and non-numeric ids
- * are skipped. `query` limits the window when the caller asked for dates.
+ * same window. Finished/completed rows, non-Slams that started more than
+ * 8 days ago, lower tiers, and non-numeric ids are skipped. `query` limits
+ * the window when the caller asked for dates. The caller also drops a
+ * calendar copy older than 48h before this runs.
  */
 export function selectTourTarget(items, now = new Date(), query = {}) {
     const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    const earliest = todayUtc - LIVE_LOOKBACK_DAYS * DAY_MS;
     const latest = todayUtc + (UPCOMING_DAYS + 1) * DAY_MS;
     const seen = new Set();
     const current = [];
@@ -139,10 +153,13 @@ export function selectTourTarget(items, now = new Date(), query = {}) {
         const rawId = item?.id ?? item?.tournamentKey;
         const id = rawId == null ? '' : String(rawId).trim();
         if (!/^\d{1,20}$/.test(id) || seen.has(id)) continue;
+        if (isFinishedEvent(item)) continue;
         const name = String(item?.name || item?.tournamentName || '').trim();
         const rankName = String(item?.tier || item?.rank?.name || '').trim();
         const rankId = item?.rankId ?? item?.rank?.id;
         if (fixtureTier({ tournamentName: name, rankName, rankId }) !== 'tour') continue;
+        const lookback = isSlamEvent(name, rankName, rankId) ? SLAM_LOOKBACK_DAYS : TOUR_LOOKBACK_DAYS;
+        const earliest = todayUtc - lookback * DAY_MS;
         const start = eventStartMs(item);
         if (!Number.isFinite(start) || start < earliest || start >= latest) continue;
         if (!overlapsQuery(start, query)) continue;

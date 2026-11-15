@@ -8,14 +8,16 @@ import { tagAsOf } from '../asOf.js';
 import { readFixtures, readTournaments, rememberFixtures } from '../d1Store.js';
 
 // Two upstream calls, same as before. The first is a tournament-specific
-// fixtures read when a live/upcoming tour event is already in D1 or the
-// calendar-year cache (no calendar fetch). The remaining call is one page of
-// the general feed. With no stored tour event, both calls stay on the general
-// feed. Never a third page, and both calls still go through rapidFetch
+// fixtures read only when a live tour event is already in a calendar copy
+// younger than CALENDAR_TARGET_MAX_AGE_MS (D1 or the calendar-year cache;
+// no calendar fetch). The remaining call is one page of the general feed.
+// A stale copy, or no live tour event, keeps both calls on the general feed.
+// Never a third page, and both calls still go through rapidFetch
 // (claimCallSlot + hard stop).
 const MAX_CALLS = 2;
 const PAGE_SIZE = 100;
 const CALENDAR_KEY = 'calendar-year';
+const CALENDAR_TARGET_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 
 function httpError(status, message) {
     throw Object.assign(new Error(message), { status });
@@ -37,22 +39,32 @@ function calendarItems(cached) {
     return [];
 }
 
-// Calendar rows already on hand. Does not call RapidAPI.
-async function storedCalendarItems(env, tour) {
+function calendarCopyFresh(iso, now) {
+    const ms = Date.parse(iso || '');
+    if (!Number.isFinite(ms)) return false;
+    const age = now.getTime() - ms;
+    return age >= -60_000 && age <= CALENDAR_TARGET_MAX_AGE_MS;
+}
+
+// Calendar rows already on hand, and only from a copy younger than 48h.
+// Does not call RapidAPI. A missing timestamp is not fresh.
+async function storedCalendarItems(env, tour, now) {
     const items = [];
     try {
         const saved = await readTournaments(env, tour);
-        if (Array.isArray(saved?.rows)) items.push(...saved.rows);
+        if (saved?.hadRows && calendarCopyFresh(saved.asOf, now)) items.push(...saved.rows);
     } catch { /* D1 miss is not a reason to fetch */ }
 
-    const year = new Date().getUTCFullYear();
+    const year = now.getUTCFullYear();
     for (const y of [year - 1, year, year + 1]) {
         const key = [CALENDAR_KEY, tour, String(y)];
         try {
-            items.push(...calendarItems(await cache.get(env, ...key)));
+            const cached = await cache.get(env, ...key);
+            if (calendarCopyFresh(cached?.cachedAt, now)) items.push(...calendarItems(cached));
         } catch { /* cache miss */ }
         try {
-            items.push(...calendarItems(await cache.getStale(env, ...key)));
+            const stale = await cache.getStale(env, ...key);
+            if (calendarCopyFresh(stale?.cachedAt, now)) items.push(...calendarItems(stale));
         } catch { /* no stale copy */ }
     }
     return items;
@@ -75,7 +87,8 @@ async function pullFixtures(env, query) {
 
     const parts = [];
     let calls = 0;
-    const target = selectTourTarget(await storedCalendarItems(env, tour), new Date(), query);
+    const now = new Date();
+    const target = selectTourTarget(await storedCalendarItems(env, tour, now), now, query);
     if (target && calls < MAX_CALLS) {
         calls += 1;
         const raw = await rapidAPI.tournamentFixtures(env, tour, target.id);

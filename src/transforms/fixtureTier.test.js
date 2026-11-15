@@ -98,4 +98,39 @@ describe('selectTourTarget', () => {
             { id: 77, name: 'Lyon Challenger', tier: 'Challenger', date: '2026-11-15T00:00:00.000Z' },
         ], now)).toBeNull();
     });
+
+    it('skips events the calendar marks finished or completed', () => {
+        const live = { id: 501, name: 'Nitto ATP Finals', tier: 'Finals', date: '2026-11-15T00:00:00.000Z' };
+        expect(selectTourTarget([
+            { ...live, id: 42, name: 'Paris', tier: 'ATP Masters 1000', finished: 1 },
+        ], now)).toBeNull();
+        expect(selectTourTarget([
+            { ...live, id: 43, name: 'Paris', tier: 'ATP Masters 1000', status: 'completed' },
+        ], now)).toBeNull();
+        expect(selectTourTarget([
+            { ...live, id: 44, name: 'Stockholm', tier: 'ATP 250', status: 'finished' },
+        ], now)).toBeNull();
+        expect(selectTourTarget([
+            { id: 44, name: 'Stockholm', tier: 'ATP 250', date: '2026-11-09T00:00:00.000Z', status: 'live', finished: 0 },
+            { id: 42, name: 'Paris', tier: 'ATP Masters 1000', date: '2026-11-14T00:00:00.000Z', status: 'completed' },
+        ], now)).toEqual({ id: '44', name: 'Stockholm', tier: 'ATP 250' });
+    });
+
+    it('uses an 8-day lookback for non-Slams and 14 days for Slams', () => {
+        expect(selectTourTarget([
+            { id: 42, name: 'Paris', tier: 'ATP Masters 1000', date: '2026-11-02T00:00:00.000Z' },
+        ], now)).toBeNull();
+        expect(selectTourTarget([
+            { id: 43, name: 'Stockholm', tier: 'ATP 250', date: '2026-11-06T00:00:00.000Z' },
+        ], now)).toBeNull();
+        expect(selectTourTarget([
+            { id: 44, name: 'Stockholm', tier: 'ATP 250', date: '2026-11-07T00:00:00.000Z' },
+        ], now)).toEqual({ id: '44', name: 'Stockholm', tier: 'ATP 250' });
+        expect(selectTourTarget([
+            { id: 9, name: 'US Open', tier: 'Grand Slam', rankId: 4, date: '2026-11-03T00:00:00.000Z' },
+        ], now)).toEqual({ id: '9', name: 'US Open', tier: 'Grand Slam' });
+        expect(selectTourTarget([
+            { id: 9, name: 'US Open', tier: 'Grand Slam', rankId: 4, date: '2026-10-31T00:00:00.000Z' },
+        ], now)).toBeNull();
+    });
 });

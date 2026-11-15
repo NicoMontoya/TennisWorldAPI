@@ -253,23 +253,51 @@ function livescoreFetchedAtHeaders(pathname, request, fetchedAt) {
     return headers;
 }
 
+const SHELL_REDIRECT = new Set([301, 302, 303, 307, 308]);
+
+// html_handling may 307 /sprint1.html → /sprint1. Follow that once on the
+// server so the browser stays on /today (or /schedule, /picks, /me).
+function shellAssetLocation(location, base) {
+    if (!location || typeof location !== 'string') return null;
+    let url;
+    try { url = new URL(location, base); } catch { return null; }
+    let baseUrl;
+    try { baseUrl = new URL(base); } catch { return null; }
+    if (url.origin !== baseUrl.origin) return null;
+    const path = url.pathname.replace(/\/+$/, '') || '/';
+    if (path !== '/sprint1') return null;
+    return url.toString();
+}
+
+async function fetchSprint1Asset(assets, pageUrl) {
+    const origin = new URL(pageUrl).origin;
+    const htmlUrl = `${origin}/sprint1.html`;
+    const first = await assets.fetch(new Request(htmlUrl, { method: 'GET' }));
+    if (!SHELL_REDIRECT.has(first.status)) return first;
+    const next = shellAssetLocation(first.headers.get('Location'), htmlUrl);
+    if (!next) return first;
+    return assets.fetch(new Request(next, { method: 'GET' }));
+}
+
 async function serveSprint1Shell(request, env, pathname) {
     const assets = env?.ASSETS;
     if (!assets || typeof assets.fetch !== 'function') {
         return jsonResponse({ error: `Unknown route: ${pathname}` }, 404, env, request);
     }
 
-    const assetUrl = new URL(request.url);
-    assetUrl.pathname = '/sprint1.html';
-    assetUrl.search = '';
     let asset;
     try {
-        asset = await assets.fetch(new Request(assetUrl.toString(), { method: 'GET' }));
+        asset = await fetchSprint1Asset(assets, request.url);
     } catch {
+        return jsonResponse({ error: `Unknown route: ${pathname}` }, 404, env, request);
+    }
+    // Never hand the html_handling redirect to the browser.
+    if (SHELL_REDIRECT.has(asset.status)) {
         return jsonResponse({ error: `Unknown route: ${pathname}` }, 404, env, request);
     }
 
     const headers = new Headers(asset.headers);
+    headers.delete('Location');
     if (!headers.has('X-Robots-Tag')) headers.set('X-Robots-Tag', 'noindex');
     if (!headers.get('Content-Type')?.toLowerCase().includes('html')) {
         headers.set('Content-Type', 'text/html; charset=utf-8');

@@ -57,6 +57,43 @@ describe('sprint1 shell routes', () => {
         expect(fetched.every(url => url.endsWith('/sprint1.html'))).toBe(true);
     });
 
+    it('follows a 307 from /sprint1.html on the server and keeps the shell URL', async () => {
+        const fetched = [];
+        const env = {
+            CORS_ORIGIN: '*',
+            ASSETS: {
+                async fetch(request) {
+                    const url = new URL(request.url);
+                    fetched.push(url.pathname);
+                    if (url.pathname === '/sprint1.html') {
+                        return new Response(null, {
+                            status: 307,
+                            headers: { Location: '/sprint1' },
+                        });
+                    }
+                    if (url.pathname === '/sprint1') {
+                        return new Response(HTML, {
+                            status: 200,
+                            headers: {
+                                'Content-Type': 'text/html; charset=utf-8',
+                                'X-Content-Type-Options': 'nosniff',
+                            },
+                        });
+                    }
+                    return new Response('missing', { status: 404 });
+                },
+            },
+        };
+        const res = await worker.fetch(new Request('https://example.test/today?tour=ATP'), env);
+        expect(res.status).toBe(200);
+        expect(res.headers.get('location')).toBeNull();
+        expect(res.headers.get('content-type')).toMatch(/text\/html/i);
+        expect(res.headers.get('x-robots-tag')).toBe('noindex');
+        expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+        expect(await res.text()).toBe(HTML);
+        expect(fetched).toEqual(['/sprint1.html', '/sprint1']);
+    });
+
     it('keeps an X-Robots-Tag the asset response already set', async () => {
         const { env } = assetsEnv({
             'Content-Type': 'text/html; charset=utf-8',

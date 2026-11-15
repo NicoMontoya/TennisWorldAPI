@@ -162,4 +162,76 @@ describe('fixtures tour events inside the two-call budget', () => {
         expect(calls.some(url => url.includes('/fixtures/tournament/42'))).toBe(false);
         expect(calls.some(url => url.includes('/tournament/calendar'))).toBe(false);
     });
+
+    async function expectBothGeneralPages(env) {
+        const calls = installFetch(saturatedFeed());
+        const res = await worker.fetch(new Request('https://example.test/api/fixtures?tour=ATP'), env);
+        const body = await res.json();
+        expect(res.status).toBe(200);
+        expect(body.ok).toBe(true);
+        expect(calls).toHaveLength(2);
+        expect(rapidCount(env)).toBe(2);
+        expect(calls.filter(url => /pageNo=1/.test(url))).toHaveLength(1);
+        expect(calls.filter(url => /pageNo=2/.test(url))).toHaveLength(1);
+        expect(calls.some(url => url.includes('/fixtures/tournament/'))).toBe(false);
+        expect(calls.some(url => url.includes('/tournament/calendar'))).toBe(false);
+        expect(body.data.some(row => row.matchKey === '12' || row.matchKey === '13')).toBe(false);
+    }
+
+    function utcDaysAgo(days) {
+        const when = new Date();
+        when.setUTCHours(0, 0, 0, 0);
+        when.setUTCDate(when.getUTCDate() - days);
+        return when.toISOString();
+    }
+
+    it('does not spend a call on an event the calendar marks finished', async () => {
+        const env = envFor();
+        await rememberTournaments(env, 'ATP', [
+            { id: 42, name: 'Paris', tier: 'ATP Masters 1000', date: new Date().toISOString(), finished: 1, status: 'completed' },
+            { id: 43, name: 'Stockholm', tier: 'ATP 250', date: utcDaysAgo(6), status: 'finished' },
+        ]);
+        await expectBothGeneralPages(env);
+    });
+
+    it('does not target a non-Slam that started more than 8 days ago', async () => {
+        const env = envFor();
+        await rememberTournaments(env, 'ATP', [
+            { id: 42, name: 'Paris', tier: 'ATP Masters 1000', date: utcDaysAgo(13) },
+            { id: 43, name: 'Stockholm', tier: 'ATP 250', date: utcDaysAgo(9) },
+        ]);
+        await expectBothGeneralPages(env);
+    });
+
+    it('keeps a Slam inside 14 days on the first call and still stops at two', async () => {
+        const env = envFor();
+        await rememberTournaments(env, 'ATP', [
+            { id: 9, name: 'US Open', tier: 'Grand Slam', rankId: 4, date: utcDaysAgo(12) },
+        ]);
+        const calls = installFetch(saturatedFeed());
+        const res = await worker.fetch(new Request('https://example.test/api/fixtures?tour=ATP'), env);
+        expect(res.status).toBe(200);
+        expect(calls).toHaveLength(2);
+        expect(rapidCount(env)).toBe(2);
+        expect(calls.filter(url => url.includes('/fixtures/tournament/9'))).toHaveLength(1);
+        expect(calls.filter(url => /pageNo=1/.test(url))).toHaveLength(1);
+        expect(calls.some(url => /pageNo=2/.test(url))).toBe(false);
+        expect(calls.some(url => url.includes('/tournament/calendar'))).toBe(false);
+    });
+
+    it('ignores a calendar copy older than 48h and uses both general pages', async () => {
+        const env = envFor();
+        await rememberTournaments(env, 'ATP', [
+            { id: Number(FINALS_ID), name: 'Nitto ATP Finals', tier: 'Finals', date: new Date().toISOString() },
+        ]);
+        const stale = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+        for (const row of env.DB._tables.tournaments) row.fetched_at = stale;
+        const year = new Date().getUTCFullYear();
+        await env.TENNIS_CACHE.put(`tw:calendar-year:ATP:${year}`, JSON.stringify({
+            data: { data: [{ id: Number(FINALS_ID), name: 'Nitto ATP Finals', tier: 'Finals', date: new Date().toISOString() }] },
+            cachedAt: stale,
+            stale: true,
+        }));
+        await expectBothGeneralPages(env);
+    });
 });
