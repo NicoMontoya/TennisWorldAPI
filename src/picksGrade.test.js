@@ -62,7 +62,8 @@ describe('retirement before the first game', () => {
                 picked_player_key: '10',
                 player1_key: '10',
                 player2_key: '11',
-                scoreless_seen: 0,
+                scoreless_first_seen_at: null,
+                scoreless_status_as_of: '',
                 result: 'pending',
                 void_reason: '',
             });
@@ -71,7 +72,8 @@ describe('retirement before the first game', () => {
                 picked_player_key: '11',
                 player1_key: '10',
                 player2_key: '11',
-                scoreless_seen: 1,
+                scoreless_first_seen_at: 1,
+                scoreless_status_as_of: '2026-11-16T12:00:00.000Z',
                 result: 'pending',
                 void_reason: '',
             });
@@ -80,7 +82,8 @@ describe('retirement before the first game', () => {
                 picked_player_key: '10',
                 player1_key: '10',
                 player2_key: '11',
-                scoreless_seen: 0,
+                scoreless_first_seen_at: null,
+                scoreless_status_as_of: '',
                 result: 'correct',
                 void_reason: '',
             });

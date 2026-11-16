@@ -77,7 +77,8 @@ export function createMemoryD1() {
                     rank_gap: null,
                     player1_key: '',
                     player2_key: '',
-                    scoreless_seen: 0,
+                    scoreless_first_seen_at: null,
+                    scoreless_status_as_of: '',
                     void_reason: '',
                     tour,
                 });
@@ -103,15 +104,20 @@ export function createMemoryD1() {
             return { meta: { changes: 1 } };
         }
         if (sql.startsWith('UPDATE picks SET result')) {
-            const [result, seen, reason, memberId, matchKey, result2, seen2, reason2] = args;
+            const [result, reason, firstSeen, asOf, memberId, matchKey, result2, reason2, firstSeen2, asOf2] = args;
             const row = findPick(memberId, matchKey);
             if (!row) return { meta: { changes: 0 } };
-            if (row.result === result2 && Number(row.scoreless_seen) === Number(seen2) && row.void_reason === reason2) {
+            const seen = (value) => (value == null || value === '' ? null : Number(value));
+            if (row.result === result2
+                && row.void_reason === reason2
+                && seen(row.scoreless_first_seen_at) === seen(firstSeen2)
+                && (row.scoreless_status_as_of || '') === (asOf2 || '')) {
                 return { meta: { changes: 0 } };
             }
             row.result = result;
-            row.scoreless_seen = seen;
             row.void_reason = reason;
+            row.scoreless_first_seen_at = seen(firstSeen);
+            row.scoreless_status_as_of = asOf || '';
             return { meta: { changes: 1 } };
         }
         // One statement, no await. Concurrent claims of the same invite cannot

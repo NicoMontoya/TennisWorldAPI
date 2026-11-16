@@ -1,7 +1,8 @@
 // Lock instant for a tour singles match. The client clock is never an input.
-// Earliest of: a status that has left Not Started; startsAtUtc; an
-// order-of-play slot when the start instant is missing; otherwise the earlier
-// of tournament-local midnight and UTC midnight at the end of the match date.
+// Status that has left Not Started locks immediately. Otherwise the lock is
+// the earliest instant among startsAtUtc, an order-of-play slot, and the
+// start of the match date (venue midnight, or UTC midnight, whichever is
+// earlier). No match date and no other instant: not pickable.
 
 const LOCKING = new Set(['Live', 'Delayed', 'Finished', 'Walkover', 'Cancelled']);
 
@@ -9,10 +10,7 @@ export function statusLocks(status) {
     return LOCKING.has(status);
 }
 
-export function timeZoneOf(row) {
-    const raw = row?.timeZone || row?.timezone || row?.tournamentTimeZone || '';
-    if (typeof raw !== 'string') return '';
-    const zone = raw.trim();
+function validZone(zone) {
     if (!zone || zone.length > 64) return '';
     try {
         new Intl.DateTimeFormat('en-US', { timeZone: zone }).format(0);
@@ -20,6 +18,16 @@ export function timeZoneOf(row) {
     } catch {
         return '';
     }
+}
+
+export function timeZoneOf(row) {
+    const explicit = validZone(String(row?.timeZone || row?.timezone || row?.tournamentTimeZone || '').trim());
+    if (explicit) return explicit;
+    const place = `${row?.venue || ''} ${row?.city || ''} ${row?.tournamentCity || ''} ${row?.tournamentName || ''}`;
+    // 2026 ATP Finals are in Turin. A feed that names the event but not a
+    // zone still locks on Europe/Rome, which is earlier than UTC in November.
+    if (/\bturin\b|\btorino\b|\batp finals\b|\bnitto\b/i.test(place)) return 'Europe/Rome';
+    return '';
 }
 
 function zoneOffsetMs(utcMs, timeZone) {
@@ -52,11 +60,6 @@ function zoneOffsetMs(utcMs, timeZone) {
     return asUtc - utcMs;
 }
 
-function nextDate(date) {
-    const [y, m, d] = date.split('-').map(Number);
-    return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
-}
-
 /** UTC ms of a civil YYYY-MM-DD HH:MM in an IANA zone. */
 export function zonedDateTimeToUtc(date, hhmm, timeZone) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return NaN;
@@ -69,15 +72,18 @@ export function zonedDateTimeToUtc(date, hhmm, timeZone) {
     return utc;
 }
 
-/** End of the match date, the earlier of local midnight and UTC midnight. */
-export function earlierMidnightUtc(date, timeZone) {
+/**
+ * Start of the match date. Venue midnight when the zone is known, otherwise
+ * UTC midnight, and the earlier of the two when both exist.
+ */
+export function earlierDayStartUtc(date, timeZone) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return NaN;
-    const utcEnd = Date.parse(`${date}T00:00:00.000Z`) + 86_400_000;
-    const zone = timeZoneOf({ timeZone });
-    if (!zone) return utcEnd;
-    const localEnd = zonedDateTimeToUtc(nextDate(date), '00:00', zone);
-    if (!Number.isFinite(localEnd)) return utcEnd;
-    return Math.min(utcEnd, localEnd);
+    const utcStart = Date.parse(`${date}T00:00:00.000Z`);
+    const zone = validZone(timeZone);
+    if (!zone) return utcStart;
+    const localStart = zonedDateTimeToUtc(date, '00:00', zone);
+    if (!Number.isFinite(localStart)) return utcStart;
+    return Math.min(utcStart, localStart);
 }
 
 function slotClock(row) {
@@ -105,19 +111,25 @@ export function orderOfPlayUtc(row) {
     return Number.isFinite(ms) ? ms : null;
 }
 
+const KIND_RANK = { start: 0, slot: 1, day_start: 2 };
+
 /**
- * @returns {{ locked: boolean, lockAt: number, kind: 'status'|'start'|'slot'|'midnight'|'unknown' }}
+ * @returns {{ locked: boolean, lockAt: number, kind: 'status'|'start'|'slot'|'day_start'|'unknown' }}
  */
 export function lockDecision(row, now) {
     const nowMs = now instanceof Date ? now.getTime() : Number(now);
     if (statusLocks(row?.status)) return { locked: true, lockAt: nowMs, kind: 'status' };
+    const options = [];
     const start = Date.parse(row?.startsAtUtc || '');
-    if (Number.isFinite(start)) return { locked: nowMs >= start, lockAt: start, kind: 'start' };
+    if (Number.isFinite(start)) options.push({ at: start, kind: 'start' });
     const slot = orderOfPlayUtc(row);
-    if (slot != null) return { locked: nowMs >= slot, lockAt: slot, kind: 'slot' };
+    if (slot != null) options.push({ at: slot, kind: 'slot' });
     if (/^\d{4}-\d{2}-\d{2}$/.test(row?.date || '')) {
-        const lockAt = earlierMidnightUtc(row.date, timeZoneOf(row));
-        return { locked: nowMs >= lockAt, lockAt, kind: 'midnight' };
+        const at = earlierDayStartUtc(row.date, timeZoneOf(row));
+        if (Number.isFinite(at)) options.push({ at, kind: 'day_start' });
     }
-    return { locked: true, lockAt: nowMs, kind: 'unknown' };
+    if (!options.length) return { locked: true, lockAt: nowMs, kind: 'unknown' };
+    options.sort((a, b) => a.at - b.at || KIND_RANK[a.kind] - KIND_RANK[b.kind]);
+    const earliest = options[0];
+    return { locked: nowMs >= earliest.at, lockAt: earliest.at, kind: earliest.kind };
 }

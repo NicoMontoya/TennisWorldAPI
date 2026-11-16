@@ -113,10 +113,17 @@ function rankGapFor(p1, p2, ranks) {
     return Math.abs(left - right);
 }
 
+function seenAt(value) {
+    if (value == null || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
 function sameDecision(pick, decision) {
     return pick.result === decision.result
         && (pick.void_reason || '') === (decision.voidReason || '')
-        && Number(pick.scoreless_seen) === Number(decision.scorelessSeen);
+        && seenAt(pick.scoreless_first_seen_at) === seenAt(decision.firstSeenAt)
+        && (pick.scoreless_status_as_of || '') === (decision.statusAsOf || '');
 }
 
 async function reconcileOne(env, pick, schedule, overlays, ranks, nowMs) {
@@ -143,42 +150,30 @@ async function reconcileOne(env, pick, schedule, overlays, ranks, nowMs) {
     if (pick.locked_at == null || !schedule) return;
     if (pick.result === 'correct' || pick.result === 'wrong') return;
     if (pick.result === 'void' && (pick.void_reason === 'cancelled' || pick.void_reason === 'player_changed')) return;
-    const decision = decideGrade(gradeRow(schedule, overlays), pick);
+    const decision = decideGrade(gradeRow(schedule, overlays), pick, nowMs);
     if (sameDecision(pick, decision)) return;
     await saveGrade(env, {
         result: decision.result,
-        scorelessSeen: decision.scorelessSeen,
+        firstSeenAt: decision.firstSeenAt,
+        statusAsOf: decision.statusAsOf,
         voidReason: decision.voidReason,
         memberId: pick.member_id,
         matchKey: pick.match_key,
     });
     pick.result = decision.result;
     pick.void_reason = decision.voidReason || '';
-    pick.scoreless_seen = decision.scorelessSeen;
+    pick.scoreless_first_seen_at = decision.firstSeenAt;
+    pick.scoreless_status_as_of = decision.statusAsOf || '';
 }
 
-async function reconcileMember(env, memberId, nowMs) {
-    const picks = await listPicks(env, memberId);
+async function reconcileList(env, picks, board, nowMs) {
     if (!picks.length) return picks;
-    const { matches, overlays } = await loadBoard(env, nowMs);
-    const byKey = new Map(matches.map(row => [String(row.matchKey), row]));
+    const byKey = new Map(board.matches.map(row => [String(row.matchKey), row]));
     const ranks = await loadRanks(env);
     for (const pick of picks) {
-        await reconcileOne(env, pick, byKey.get(String(pick.match_key)) || null, overlays, ranks, nowMs);
+        await reconcileOne(env, pick, byKey.get(String(pick.match_key)) || null, board.overlays, ranks, nowMs);
     }
-    return listPicks(env, memberId);
-}
-
-async function reconcileAll(env, nowMs) {
-    const picks = await listPicks(env);
-    if (!picks.length) return picks;
-    const { matches, overlays } = await loadBoard(env, nowMs);
-    const byKey = new Map(matches.map(row => [String(row.matchKey), row]));
-    const ranks = await loadRanks(env);
-    for (const pick of picks) {
-        await reconcileOne(env, pick, byKey.get(String(pick.match_key)) || null, overlays, ranks, nowMs);
-    }
-    return listPicks(env);
+    return picks;
 }
 
 function mineView(pick, match) {
@@ -266,8 +261,9 @@ async function readJson(request) {
 export async function handlePicksOpen(request, env) {
     const user = await assertMember(request, env);
     const nowMs = picksNow();
-    const picks = await reconcileMember(env, user.email, nowMs);
-    const { matches } = await loadBoard(env, nowMs);
+    const board = await loadBoard(env, nowMs);
+    const picks = await reconcileList(env, await listPicks(env, user.email), board, nowMs);
+    const matches = board.matches;
     const mine = new Map(picks.map(pick => [String(pick.match_key), pick]));
     const open = [];
     for (const match of matches) {
@@ -364,9 +360,9 @@ export async function handlePicksSave(request, env) {
 export async function handlePicksMine(request, env) {
     const user = await assertMember(request, env);
     const nowMs = picksNow();
-    const picks = await reconcileMember(env, user.email, nowMs);
-    const { matches } = await loadBoard(env, nowMs);
-    const byKey = new Map(matches.map(row => [String(row.matchKey), row]));
+    const board = await loadBoard(env, nowMs);
+    const picks = await reconcileList(env, await listPicks(env, user.email), board, nowMs);
+    const byKey = new Map(board.matches.map(row => [String(row.matchKey), row]));
     const views = picks
         .slice()
         .sort((a, b) => Number(b.updated_at) - Number(a.updated_at) || String(b.match_key).localeCompare(String(a.match_key)))
@@ -377,7 +373,8 @@ export async function handlePicksMine(request, env) {
 export async function handleLeaderboard(request, env) {
     await assertMember(request, env);
     const nowMs = picksNow();
-    const picks = await reconcileAll(env, nowMs);
+    const board = await loadBoard(env, nowMs);
+    const picks = await reconcileList(env, await listPicks(env), board, nowMs);
     const names = new Map();
     for (const pick of picks) {
         if (names.has(pick.member_id)) continue;

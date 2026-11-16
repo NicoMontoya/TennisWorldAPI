@@ -1,10 +1,10 @@
 // D1 picks. The lock check is the upsert's WHERE, not a read followed by a write.
 
 const COLUMNS = `member_id, match_key, picked_player_key, created_at, updated_at, locked_at, lock_at,
-    result, rank_gap, player1_key, player2_key, scoreless_seen, void_reason, tour`;
+    result, rank_gap, player1_key, player2_key, scoreless_first_seen_at, scoreless_status_as_of, void_reason, tour`;
 
 export const UPSERT_PICK_SQL = `INSERT INTO picks (${COLUMNS})
-SELECT ?, ?, ?, ?, ?, NULL, ?, 'pending', NULL, '', '', 0, '', ?
+SELECT ?, ?, ?, ?, ?, NULL, ?, 'pending', NULL, '', '', NULL, '', ?
 WHERE ? > ?
 ON CONFLICT(member_id, match_key) DO UPDATE SET
     picked_player_key = excluded.picked_player_key,
@@ -19,9 +19,9 @@ WHERE picks.locked_at IS NULL AND excluded.lock_at > ? AND picks.lock_at > ?`;
 const LOCK_SQL = `UPDATE picks SET locked_at = ?, player1_key = ?, player2_key = ?, rank_gap = ?
 WHERE member_id = ? AND match_key = ? AND locked_at IS NULL`;
 
-const GRADE_SQL = `UPDATE picks SET result = ?, scoreless_seen = ?, void_reason = ?
+const GRADE_SQL = `UPDATE picks SET result = ?, void_reason = ?, scoreless_first_seen_at = ?, scoreless_status_as_of = ?
 WHERE member_id = ? AND match_key = ?
-AND (result != ? OR scoreless_seen != ? OR void_reason != ?)`;
+AND (result != ? OR void_reason != ? OR IFNULL(scoreless_first_seen_at, -1) != IFNULL(?, -1) OR scoreless_status_as_of != ?)`;
 
 const SELECT_SQL = `SELECT ${COLUMNS} FROM picks`;
 
@@ -68,15 +68,19 @@ export async function lockPick(env, row) {
 
 export async function saveGrade(env, row) {
     const reason = row.voidReason || '';
+    const firstSeen = row.firstSeenAt == null || row.firstSeenAt === '' ? null : Number(row.firstSeenAt);
+    const asOf = row.statusAsOf || '';
     const result = await db(env).prepare(GRADE_SQL).bind(
         row.result,
-        row.scorelessSeen,
         reason,
+        firstSeen,
+        asOf,
         row.memberId,
         row.matchKey,
         row.result,
-        row.scorelessSeen,
         reason,
+        firstSeen,
+        asOf,
     ).run();
     return changesOf(result);
 }

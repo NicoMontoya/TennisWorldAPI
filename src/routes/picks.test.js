@@ -131,10 +131,10 @@ async function seed(env, rows) {
     await rememberFixtures(env, 'ATP', rows);
 }
 
-function putLivescore(env, rows) {
+function putLivescore(env, rows, cachedAt = '2026-11-16T12:00:00.000Z') {
     env.TENNIS_CACHE._store.set('tw:livescore3:ATP:all', JSON.stringify({
         data: rows,
-        cachedAt: '2026-11-16T12:00:00.000Z',
+        cachedAt,
     }));
 }
 
@@ -256,57 +256,80 @@ describe('picks API', () => {
         expect(env.DB._tables.picks[0].locked_at).toBe(now);
     });
 
-    it('refuses a pick inside the same D1 statement at the earlier of the two midnights', async () => {
+    it('locks an untimed match at the start of the match date, including a stale Not Started cache', async () => {
         const cookie = await member();
+        const untimed = (matchKey, extra = {}) => fixture({
+            matchKey,
+            startsAtUtc: '',
+            time: '',
+            date: '2026-11-16',
+            timeZone: '',
+            ...extra,
+        });
         await seed(env, [
-            fixture({
-                matchKey: 'rome',
-                startsAtUtc: '',
-                time: '',
-                date: '2026-11-16',
-                timeZone: 'Europe/Rome',
-            }),
-            fixture({
-                matchKey: 'nyc',
-                startsAtUtc: '',
-                time: '',
-                date: '2026-11-16',
-                timeZone: 'America/New_York',
-                player1Key: '20',
-                player2Key: '21',
+            untimed('dayof'),
+            untimed('stale'),
+            untimed('early'),
+            untimed('nodate', { date: '' }),
+            untimed('vienna', {
+                tournamentName: 'Vienna',
+                tier: 'tour',
+                player1Key: '50',
+                player2Key: '51',
             }),
         ]);
-        now = Date.parse('2026-11-16T22:30:00.000Z');
-        expect((await postPick(cookie, { matchKey: 'rome', playerKey: '10' })).status).toBe(200);
-        expect((await postPick(cookie, { matchKey: 'nyc', playerKey: '20' })).status).toBe(200);
+        now = Date.parse('2026-11-16T12:00:00.000Z');
+        const empty = await postPick(cookie, { matchKey: 'dayof', playerKey: '10' });
+        expect(empty.status).toBe(409);
+        expect(await empty.json()).toEqual({ ok: false, error: 'That match is locked.' });
+        putLivescore(env, [live({
+            matchKey: 'stale',
+            status: 'Not Started',
+            statusText: 'Not Started',
+            winner: '',
+            setScores: [],
+        })], '2026-11-15T08:00:00.000Z');
+        const stale = await postPick(cookie, { matchKey: 'stale', playerKey: '10' });
+        expect(stale.status).toBe(409);
+        expect(env.DB._tables.picks.filter(row => row.match_key === 'dayof' || row.match_key === 'stale')).toHaveLength(0);
 
-        now = Date.parse('2026-11-16T23:30:00.000Z');
-        const rome = await postPick(cookie, { matchKey: 'rome', playerKey: '11' });
-        expect(rome.status).toBe(409);
-        const nycOpen = await postPick(cookie, { matchKey: 'nyc', playerKey: '21' });
-        expect(nycOpen.status).toBe(200);
+        now = Date.parse('2026-11-15T12:00:00.000Z');
+        const opened = await worker.fetch(call('/api/picks/open', { cookie }), env);
+        const earlyCard = (await opened.json()).data.matches.find(match => match.matchKey === 'early');
+        expect(earlyCard.lockKind).toBe('day_start');
+        expect(earlyCard.locksAtUtc).toBe('2026-11-15T23:00:00.000Z');
+        expect((await postPick(cookie, { matchKey: 'early', playerKey: '10' })).status).toBe(200);
+        const missing = await postPick(cookie, { matchKey: 'nodate', playerKey: '10' });
+        expect(missing.status).toBe(400);
 
-        now = Date.parse('2026-11-17T02:00:00.000Z');
-        const nyc = await postPick(cookie, { matchKey: 'nyc', playerKey: '20' });
-        expect(nyc.status).toBe(409);
-        expect(env.DB._tables.picks.find(row => row.match_key === 'rome').picked_player_key).toBe('10');
-        expect(env.DB._tables.picks.find(row => row.match_key === 'nyc').picked_player_key).toBe('21');
+        now = Date.parse('2026-11-15T23:30:00.000Z');
+        expect((await postPick(cookie, { matchKey: 'early', playerKey: '11' })).status).toBe(409);
+        const vienna = await postPick(cookie, { matchKey: 'vienna', playerKey: '50' });
+        expect(vienna.status).toBe(200);
+        expect(env.DB._tables.picks.find(row => row.match_key === 'vienna').lock_at)
+            .toBe(Date.parse('2026-11-16T00:00:00.000Z'));
     });
 
-    it('refuses a pick inside the same D1 statement at the order-of-play slot', async () => {
+    it('lockDecision uses the earliest of startsAtUtc, the order-of-play slot, and day start', async () => {
         const cookie = await member();
         await seed(env, [fixture({
-            startsAtUtc: '',
-            time: '14:00',
-            date: '2026-11-16',
+            startsAtUtc: '2026-11-16T20:00:00.000Z',
+            orderOfPlay: '2026-11-16T15:00:00.000Z',
+            date: '2026-11-17',
+            time: '',
             timeZone: 'Europe/Rome',
         })]);
-        now = Date.parse('2026-11-16T12:30:00.000Z');
+        now = Date.parse('2026-11-16T14:00:00.000Z');
+        const opened = await worker.fetch(call('/api/picks/open', { cookie }), env);
+        const card = (await opened.json()).data.matches[0];
+        expect(card.lockKind).toBe('slot');
+        expect(card.locksAtUtc).toBe('2026-11-16T15:00:00.000Z');
         expect((await postPick(cookie, { matchKey: 'm1', playerKey: '10' })).status).toBe(200);
-        now = Date.parse('2026-11-16T13:00:00.000Z');
+        now = Date.parse('2026-11-16T15:00:00.000Z');
         const res = await postPick(cookie, { matchKey: 'm1', playerKey: '11' });
         expect(res.status).toBe(409);
         expect(env.DB._tables.picks[0].picked_player_key).toBe('10');
+        expect(env.DB._tables.picks[0].lock_at).toBe(Date.parse('2026-11-16T15:00:00.000Z'));
     });
 
     it('signed-out picks and leaderboard requests are 401', async () => {
@@ -422,7 +445,7 @@ describe('picks API', () => {
         expect(open.headers.get('Cache-Control')).toBe('private, no-store');
     });
 
-    it('voidReason is walkover only after a later scoreless refresh', async () => {
+    it('two reads of the same scoreless snapshot stay pending', async () => {
         const cookie = await member();
         await seed(env, [fixture()]);
         await rememberStandings(env, 'ATP', [
@@ -430,21 +453,35 @@ describe('picks API', () => {
             { playerKey: '11', rank: 21, name: 'Sinner' },
         ]);
         expect((await postPick(cookie, { matchKey: 'm1', playerKey: '10' })).status).toBe(200);
-        putLivescore(env, [live({ setScores: [], winner: '10', status: 'Finished', statusText: 'Finished' })]);
+        const asOf = new Date(now).toISOString();
+        const scoreless = [live({ setScores: [], winner: '10', status: 'Finished', statusText: 'Finished' })];
+        putLivescore(env, scoreless, asOf);
         const first = await worker.fetch(call('/api/picks/mine', { cookie }), env);
-        const pending = (await first.json()).data.picks[0];
-        expect(pending.result).toBe('pending');
-        expect(pending.voidReason).toBeNull();
-        expect(env.DB._tables.picks[0].scoreless_seen).toBe(1);
+        expect((await first.json()).data.picks[0]).toMatchObject({ result: 'pending', voidReason: null });
+        expect(env.DB._tables.picks[0].scoreless_first_seen_at).toBe(now);
+        expect(env.DB._tables.picks[0].scoreless_status_as_of).toBe(asOf);
         expect(env.DB._tables.picks[0].rank_gap).toBe(17);
+        now += 15 * 60 * 1000;
         const second = await worker.fetch(call('/api/picks/mine', { cookie }), env);
-        const voided = (await second.json()).data.picks[0];
-        expect(voided.result).toBe('void');
-        expect(voided.voidReason).toBe('walkover');
-        expect(JSON.stringify(voided)).not.toContain('rank_gap');
+        expect((await second.json()).data.picks[0]).toMatchObject({ result: 'pending', voidReason: null });
+        expect(env.DB._tables.picks[0].scoreless_first_seen_at).toBe(now - 15 * 60 * 1000);
+    });
+
+    it('a newer scoreless snapshot 15 minutes later voids as walkover', async () => {
+        const cookie = await member();
+        await seed(env, [fixture()]);
+        expect((await postPick(cookie, { matchKey: 'm1', playerKey: '10' })).status).toBe(200);
+        const scoreless = [live({ setScores: [], winner: '10', status: 'Finished', statusText: 'Finished' })];
+        putLivescore(env, scoreless, new Date(now).toISOString());
+        await worker.fetch(call('/api/picks/mine', { cookie }), env);
+        now += 15 * 60 * 1000;
+        putLivescore(env, scoreless, new Date(now).toISOString());
+        const voided = await worker.fetch(call('/api/picks/mine', { cookie }), env);
+        const body = (await voided.json()).data.picks[0];
+        expect(body).toMatchObject({ result: 'void', voidReason: 'walkover' });
+        expect(JSON.stringify(body)).not.toContain('rank_gap');
         const frozen = JSON.stringify(env.DB._tables.picks[0]);
-        const third = await worker.fetch(call('/api/picks/mine', { cookie }), env);
-        expect((await third.json()).data.picks[0].voidReason).toBe('walkover');
+        await worker.fetch(call('/api/picks/mine', { cookie }), env);
         expect(JSON.stringify(env.DB._tables.picks[0])).toBe(frozen);
     });
 
@@ -453,17 +490,19 @@ describe('picks API', () => {
         await seed(env, [fixture(), fixture({ matchKey: 'm2', player1Key: '12', player2Key: '13' })]);
         expect((await postPick(cookie, { matchKey: 'm1', playerKey: '10' })).status).toBe(200);
         expect((await postPick(cookie, { matchKey: 'm2', playerKey: '13' })).status).toBe(200);
-        putLivescore(env, [
+        const scoreless = [
             live({ setScores: [], winner: '10' }),
             live({ matchKey: 'm2', player1Key: '12', player2Key: '13', setScores: [], winner: '12' }),
-        ]);
+        ];
+        putLivescore(env, scoreless, new Date(now).toISOString());
         await worker.fetch(call('/api/picks/mine', { cookie }), env);
         await worker.fetch(call('/api/picks/mine', { cookie }), env);
-        expect(env.DB._tables.picks.find(row => row.match_key === 'm2').result).toBe('void');
+        expect(env.DB._tables.picks.every(row => row.result === 'pending')).toBe(true);
+        now += 60_000;
         putLivescore(env, [
             live({ setScores: ['6-4', '6-3'], winner: '10', status: 'Finished', statusText: 'Finished' }),
             live({ matchKey: 'm2', player1Key: '12', player2Key: '13', setScores: ['7-5'], winner: '12', status: 'Finished', statusText: 'Finished' }),
-        ]);
+        ], new Date(now).toISOString());
         const res = await worker.fetch(call('/api/picks/mine', { cookie }), env);
         const picks = (await res.json()).data.picks;
         expect(picks.find(pick => pick.matchKey === 'm1')).toMatchObject({ result: 'correct', voidReason: null });
@@ -559,13 +598,16 @@ describe('picks API', () => {
         now += 1000;
         expect((await postPick(grace, { matchKey: 'b', playerKey: '21' }, '203.0.113.13')).status).toBe(200);
 
-        putLivescore(env, [
+        const boardRows = [
             live({ matchKey: 'a', winner: '10', setScores: ['6-4', '6-4'] }),
             live({ matchKey: 'b', player1Key: '20', player2Key: '21', winner: '20', setScores: ['6-3', '6-2'] }),
             live({ matchKey: 'c', player1Key: '30', player2Key: '31', winner: '30', setScores: ['7-6', '6-4'] }),
             live({ matchKey: 'w', player1Key: '40', player2Key: '41', winner: '40', setScores: [], status: 'Finished', statusText: 'Finished' }),
-        ]);
+        ];
+        putLivescore(env, boardRows, new Date(now).toISOString());
         await worker.fetch(call('/api/picks/mine', { cookie: ada }), env);
+        now += 15 * 60 * 1000;
+        putLivescore(env, boardRows, new Date(now).toISOString());
         await worker.fetch(call('/api/picks/mine', { cookie: ada }), env);
 
         const mine = await worker.fetch(call('/api/picks/mine', { cookie: ada }), env);

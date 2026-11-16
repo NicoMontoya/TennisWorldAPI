@@ -9,8 +9,11 @@
 -- member_id, or an email into a response.
 -- lock_at is the server-computed lock instant. The upsert refuses a change
 -- in the same statement when locked_at is set or now is past lock_at.
--- scoreless_seen counts scoreless observations. A walkover voids only when
--- a later refresh is still scoreless. player1_key / player2_key freeze the
+-- scoreless_first_seen_at is the server clock of the first scoreless
+-- walkover sight. scoreless_status_as_of is the feed statusAsOf at that
+-- sight. A walkover voids only when the match is still scoreless, at least
+-- 15 minutes have passed, and a newer statusAsOf has arrived. Page reads of
+-- the same snapshot do not void. player1_key / player2_key freeze the
 -- pairing at lock so an alternate swap can void every pick.
 
 CREATE TABLE IF NOT EXISTS picks (
@@ -25,7 +28,8 @@ CREATE TABLE IF NOT EXISTS picks (
     rank_gap INTEGER,
     player1_key TEXT NOT NULL DEFAULT '',
     player2_key TEXT NOT NULL DEFAULT '',
-    scoreless_seen INTEGER NOT NULL DEFAULT 0,
+    scoreless_first_seen_at INTEGER,
+    scoreless_status_as_of TEXT NOT NULL DEFAULT '',
     void_reason TEXT NOT NULL DEFAULT '' CHECK (void_reason IN ('', 'walkover', 'cancelled', 'player_changed')),
     tour TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (member_id, match_key)
