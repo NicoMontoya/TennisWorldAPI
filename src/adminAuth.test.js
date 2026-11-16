@@ -23,6 +23,7 @@ describe('admin secret compare', () => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                Origin: 'https://example.test',
                 'x-admin-secret': 'test',
             },
             body: JSON.stringify({ resource: 'fixtures', tour: 'ATP' }),

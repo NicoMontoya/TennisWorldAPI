@@ -4,17 +4,15 @@
 // GET  /api/favorites         — list current user's favorites
 // POST /api/favorites/toggle  — add or remove a player
 
-import { getAuthUser, saveUser } from './auth.js';
+import { assertMember, saveUser } from './auth.js';
 
 export async function handleFavorites(request, env) {
-    const user = await getAuthUser(request, env);
-    if (!user) throw Object.assign(new Error('Unauthorized'), { status: 401 });
+    const user = await assertMember(request, env);
     return { favorites: user.favorites || [] };
 }
 
 export async function handleFavoritesToggle(request, env) {
-    const user = await getAuthUser(request, env);
-    if (!user) throw Object.assign(new Error('Unauthorized'), { status: 401 });
+    const user = await assertMember(request, env);
 
     const { playerKey, name, country, tour } = await request.json();
     if (!playerKey) throw Object.assign(new Error('playerKey is required'), { status: 400 });

@@ -1,6 +1,6 @@
 // In-memory D1 double for tests. Understands the statements d1Store.js sends.
 
-const TABLES = ['tournaments', 'draws', 'fixtures', 'standings', 'd1_write_ledger', 'api_tennis_lists', 'call_tally'];
+const TABLES = ['tournaments', 'draws', 'fixtures', 'standings', 'd1_write_ledger', 'api_tennis_lists', 'call_tally', 'invites'];
 const PK = {
     tournaments: ['tour', 'tournament_key'],
     draws: ['tour', 'tournament_key'],
@@ -9,6 +9,7 @@ const PK = {
     d1_write_ledger: ['day'],
     api_tennis_lists: ['resource', 'tour', 'natural_key'],
     call_tally: ['provider', 'utc_day'],
+    invites: ['hash'],
 };
 
 function claimCallTally(tables, args) {
@@ -48,6 +49,22 @@ export function createMemoryD1() {
     }
 
     function exec(sql, args) {
+        // One statement, no await. Concurrent claims of the same invite cannot
+        // both observe uses < max_uses.
+        if (sql.startsWith('UPDATE invites SET uses = uses + 1')) {
+            const row = tables.invites.find(item => item.hash === args[0]);
+            if (!row || Number(row.revoked) !== 0 || !(Number(row.uses) < Number(row.max_uses))) {
+                return { success: true, meta: { changes: 0 } };
+            }
+            row.uses = Number(row.uses) + 1;
+            return { success: true, meta: { changes: 1 } };
+        }
+        if (sql.startsWith('UPDATE invites SET revoked = 1')) {
+            const row = tables.invites.find(item => item.hash === args[0]);
+            if (!row) return { success: true, meta: { changes: 0 } };
+            row.revoked = 1;
+            return { success: true, meta: { changes: 1 } };
+        }
         if (sql.startsWith('INSERT INTO d1_write_ledger')) {
             const day = args[0];
             if (!tables.d1_write_ledger.some(row => row.day === day)) {
@@ -84,6 +101,15 @@ export function createMemoryD1() {
     }
 
     function query(sql, args) {
+        if (sql.includes('FROM invites')) {
+            let rows = tables.invites;
+            if (sql.includes('WHERE hash = ?')) {
+                rows = rows.filter(row => row.hash === args[0]);
+            }
+            return rows
+                .map(row => ({ ...row }))
+                .sort((a, b) => Number(a.created_at) - Number(b.created_at));
+        }
         if (sql.startsWith('SELECT writes FROM d1_write_ledger')) {
             const row = tables.d1_write_ledger.find(item => item.day === args[0]);
             return row ? [{ writes: row.writes }] : [];

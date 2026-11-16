@@ -214,7 +214,7 @@ describe('import and backfill auth', () => {
 
         const noHeader = await worker.fetch(new Request('https://example.test/api/admin/backfill-last-good', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', Origin: 'https://example.test' },
             body: JSON.stringify({ resource: 'fixtures', tour: 'ATP' }),
         }), env);
         expect(noHeader.status).toBe(401);
@@ -222,13 +222,15 @@ describe('import and backfill auth', () => {
 
         const queryOnly = await worker.fetch(new Request('https://example.test/api/admin/backfill-rankings?secret=test-admin-secret', {
             method: 'POST',
+            headers: { 'Content-Type': 'application/json', Origin: 'https://example.test' },
+            body: '{}',
         }), env);
         expect(queryOnly.status).toBe(401);
 
         const closed = cacheEnv({ ADMIN_SECRET: '' });
         const withHeader = await worker.fetch(new Request('https://example.test/api/admin/backfill-last-good', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-admin-secret': 'test-admin-secret' },
+            headers: { 'Content-Type': 'application/json', Origin: 'https://example.test', 'x-admin-secret': 'test-admin-secret' },
             body: JSON.stringify({ resource: 'fixtures', tour: 'ATP' }),
         }), closed);
         expect(withHeader.status).toBe(401);
@@ -247,7 +249,7 @@ describe('import and backfill auth', () => {
         });
         const res = await worker.fetch(new Request('https://example.test/api/admin/backfill-last-good', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-admin-secret': 'test-admin-secret' },
+            headers: { 'Content-Type': 'application/json', Origin: 'https://example.test', 'x-admin-secret': 'test-admin-secret' },
             body: JSON.stringify({ resource: 'fixtures', tour: 'ATP', page: 1 }),
         }), env);
         const body = await res.json();

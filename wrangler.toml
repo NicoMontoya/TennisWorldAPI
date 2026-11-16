@@ -9,6 +9,10 @@ compatibility_flags = ["nodejs_compat"]
 [assets]
 directory = "../TennisWorldUI"
 binding   = "ASSETS"
+# Asset requests go through the worker so every response, including files
+# from this binding, can carry X-Robots-Tag. The worker fetches env.ASSETS
+# for paths it does not handle itself.
+run_worker_first = true
 
 # ── KV Cache ───────────────────────────────────────────────────────────────────
 # Create with: npx wrangler kv namespace create TENNIS_CACHE

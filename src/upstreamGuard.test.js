@@ -203,6 +203,7 @@ describe('upstream key and backfill caps', () => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                Origin: 'https://example.test',
                 'x-admin-secret': 'test-admin-secret',
             },
             body: JSON.stringify({ resource: 'fixtures', tour: 'ATP' }),
@@ -230,6 +231,7 @@ describe('upstream key and backfill caps', () => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                Origin: 'https://example.test',
                 'x-admin-secret': 'test-admin-secret',
             },
             body: JSON.stringify({ resource: 'fixtures', tour: 'ATP' }),

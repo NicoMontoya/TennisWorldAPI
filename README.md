@@ -162,8 +162,7 @@ via `--worker` / `WORKER_URL` — see [docs/sackmann-atp-backfill.md](docs/sackm
 ## Security notes
 
 - `/api/admin/*` import and backfill routes are POST-only, require the `x-admin-secret` header (`ADMIN_SECRET`, a secret, never a var), and fail closed when it is unset. A query-string secret is ignored.
-- Auth: PBKDF2 (100k iters, per-user salt), 30-day KV sessions, Bearer tokens.
-- Register/login are rate-limited per IP (best-effort KV counter, 10 per 10 min).
+- Auth: PBKDF2 (100k iters, per-user salt), 30-day KV sessions in an `__Host-tw_session` cookie (`HttpOnly; Secure; SameSite=Lax; Path=/`). `Authorization` is not a session. Register, redeem, and login share one per-IP limit (best-effort KV counter, 10 per 10 min).
 - `GET /api/hub` and `GET /api/livescore` are rate-limited per IP via the Cache API (`https://rl.internal/{hub|livescore}/{ip}`, 60 per 60s). Livescore cache is 60s when matches are live, scheduled, or delayed, and 2 min only when the board is finished-only / empty; hub stays 5 min (live overlay from the livescore cache on hit). Auth register/login remain on a KV counter.
 - `tour` on hub/livescore/draws is ATP|WTA only. `tournamentKey` on livescore/draws/fixtures is digits-only (`/^\d{1,20}$/`).
 - `.dev.vars` is git-ignored; no secrets in `wrangler.toml` or frontend JS.

@@ -29,7 +29,12 @@ import { handleBackfillLastGood } from './routes/adminLastGood.js';
 import { handleImportOfficialDraw } from './routes/officialDrawAdmin.js';
 import { handleRankingsHistory, handleImportRankingsHistory } from './routes/rankingsHistory.js';
 import { handleSurfaceForm } from './routes/surfaceForm.js';
-import { handleRegister, handleLogin, handleLogout, handleMe, handleUpdateProfile, handleChangePassword } from './routes/auth.js';
+import {
+    handleRegister, handleLogin, handleLogout, handleRedeem, handleMe,
+    handleUpdateProfile, handleChangePassword, handleAdminRevokeMember,
+    assertMember, isMemberRoute, takeSetCookies,
+} from './routes/auth.js';
+import { handleCreateInvite, handleRevokeInvite, handleListInvites } from './routes/invites.js';
 import { handleFavorites, handleFavoritesToggle }              from './routes/favorites.js';
 import { handlePredict }      from './routes/predict.js';
 import { handleBracketSave, handleBracketMine, handleBracketLeaders, handleBracketPublic } from './routes/userBrackets.js';
@@ -67,8 +72,13 @@ const POST_ROUTES = {
     '/api/auth/register':         handleRegister,
     '/api/auth/login':            handleLogin,
     '/api/auth/logout':           handleLogout,
+    '/api/auth/redeem':           handleRedeem,
     '/api/auth/update-profile':   handleUpdateProfile,
     '/api/auth/change-password':  handleChangePassword,
+    '/api/admin/invites':         handleCreateInvite,
+    '/api/admin/invites/revoke':  handleRevokeInvite,
+    '/api/admin/invites/list':    handleListInvites,
+    '/api/admin/members/revoke':  handleAdminRevokeMember,
     '/api/favorites/toggle':          handleFavoritesToggle,
     '/api/bracket/save':              handleBracketSave,
     '/api/admin/import-rank-history': handleImportRankHistory,
@@ -94,11 +104,13 @@ export function sprint1ShellPath(pathname) {
     return SPRINT1_PATHS.has(bare) ? bare : null;
 }
 
-// Session and per-user payloads. Browsers, shared proxies, and the edge must
-// not store these. Public routes are absent on purpose and keep their headers.
+// Session, invite, and per-user payloads. Browsers, shared proxies, and the
+// edge must not store these. Public routes are absent on purpose.
 const PRIVATE_NO_STORE = new Set([
     '/api/auth/register',
     '/api/auth/login',
+    '/api/auth/logout',
+    '/api/auth/redeem',
     '/api/auth/me',
     '/api/auth/update-profile',
     '/api/auth/change-password',
@@ -106,7 +118,44 @@ const PRIVATE_NO_STORE = new Set([
     '/api/favorites/toggle',
     '/api/bracket/mine',
     '/api/bracket/save',
+    '/api/bracket/leaders',
+    '/api/bracket/public',
+    '/api/admin/invites',
+    '/api/admin/invites/revoke',
+    '/api/admin/invites/list',
+    '/api/admin/members/revoke',
 ]);
+
+export const ROBOTS_TAG = 'noindex, nofollow';
+const ROBOTS_META = '<meta name="robots" content="noindex,nofollow">';
+const ROBOTS_TXT = 'User-agent: *\nDisallow: /\n';
+
+export function injectRobotsMeta(html) {
+    if (typeof html !== 'string') return html;
+    if (/<meta\s[^>]*name\s*=\s*["']robots["']/i.test(html)) return html;
+    if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => `${m}${ROBOTS_META}`);
+    if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => `${m}${ROBOTS_META}`);
+    return ROBOTS_META + html;
+}
+
+function isPrivateNoStore(pathname) {
+    return PRIVATE_NO_STORE.has(pathname) || isMemberRoute(pathname);
+}
+
+// Every state-changing POST: JSON body and a same-origin Origin. A missing
+// or cross-site Origin is 403. The admin secret does not bypass this.
+function assertJsonSameOrigin(request) {
+    let expected = '';
+    try { expected = new URL(request.url).origin; } catch { expected = ''; }
+    const origin = request.headers.get('Origin');
+    if (!origin || origin !== expected) {
+        throw Object.assign(new Error('Forbidden'), { status: 403 });
+    }
+    const media = (request.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+    if (media !== 'application/json') {
+        throw Object.assign(new Error('Content-Type must be application/json'), { status: 415 });
+    }
+}
 
 // ── CORS headers ──────────────────────────────────────────────────────────────
 // Production: honor the configured CORS_ORIGIN.
@@ -187,11 +236,17 @@ export default {
 
         // Preflight
         if (request.method === 'OPTIONS') {
-            return new Response(null, { status: 204, headers: corsHeaders(env, request) });
+            const headers = new Headers(corsHeaders(env, request));
+            headers.set('X-Robots-Tag', ROBOTS_TAG);
+            return new Response(null, { status: 204, headers });
         }
 
-        if (request.method === 'GET' && sprint1ShellPath(pathname)) {
-            return serveSprint1Shell(request, env, pathname);
+        if ((request.method === 'GET' || request.method === 'HEAD') && pathname === '/robots.txt') {
+            return headIfNeeded(request, robotsTxtResponse());
+        }
+
+        if ((request.method === 'GET' || request.method === 'HEAD') && sprint1ShellPath(pathname)) {
+            return headIfNeeded(request, await serveSprint1Shell(request, env, pathname));
         }
 
         let handler;
@@ -199,11 +254,28 @@ export default {
         if (request.method === 'POST') handler = POST_ROUTES[pathname];
 
         if (!handler) {
+            if (request.method === 'GET' || request.method === 'POST' || request.method === 'HEAD') {
+                if (isMemberRoute(pathname) && request.method !== 'HEAD') {
+                    try {
+                        if (request.method === 'POST') assertJsonSameOrigin(request);
+                        await assertMember(request, env);
+                    } catch (err) {
+                        return errorResponse(err, request, env, pathname);
+                    }
+                }
+            }
+            if ((request.method === 'GET' || request.method === 'HEAD') && !pathname.startsWith('/api')) {
+                const asset = await serveBoundAsset(request, env);
+                if (asset) return headIfNeeded(request, asset);
+            }
             return jsonResponse({ error: `Unknown route: ${pathname}` }, 404, env, request);
         }
 
         try {
+            if (request.method === 'POST') assertJsonSameOrigin(request);
+            if (isMemberRoute(pathname)) await assertMember(request, env);
             const data = await handler(request, env);
+            const cookies = takeSetCookies(data);
             // Scores polls /api/livescore and still expects data to be the match
             // array. The upstream time is a response header, not a body field.
             // The header is always set so a missing header cannot signal a stop.
@@ -213,22 +285,26 @@ export default {
             const body = { ok: true, data };
             const asOf = readAsOf(data);
             if (asOf) body.asOf = asOf;
-            return jsonResponse(body, 200, env, request, extra);
+            return jsonResponse(body, 200, env, request, extra, cookies);
         } catch (err) {
-            const message = publicErrorMessage(err);
-            console.error(`[${pathname}]`, message);
-            const status = err.status || 500;
-            // QuotaStopError's message is already generic. Force it anyway so a
-            // remaining count or stop flag can never reach the client.
-            const extra = livescoreFetchedAtHeaders(
-                pathname,
-                request,
-                thrownLivescoreFetchedAt(request),
-            );
-            return jsonResponse({ ok: false, error: message }, status, env, request, extra);
+            return errorResponse(err, request, env, pathname);
         }
     },
 };
+
+function errorResponse(err, request, env, pathname) {
+    const message = publicErrorMessage(err);
+    console.error(`[${pathname}]`, message);
+    const status = err.status || 500;
+    // QuotaStopError's message is already generic. Force it anyway so a
+    // remaining count or stop flag can never reach the client.
+    const extra = livescoreFetchedAtHeaders(
+        pathname,
+        request,
+        thrownLivescoreFetchedAt(request),
+    );
+    return jsonResponse({ ok: false, error: message }, status, env, request, extra);
+}
 
 function thrownLivescoreFetchedAt(request) {
     try {
@@ -298,26 +374,88 @@ async function serveSprint1Shell(request, env, pathname) {
 
     const headers = new Headers(asset.headers);
     headers.delete('Location');
-    if (!headers.has('X-Robots-Tag')) headers.set('X-Robots-Tag', 'noindex');
+    headers.set('X-Robots-Tag', ROBOTS_TAG);
     if (!headers.get('Content-Type')?.toLowerCase().includes('html')) {
         headers.set('Content-Type', 'text/html; charset=utf-8');
     }
-    return new Response(asset.body, {
+    const html = injectRobotsMeta(await asset.text());
+    return new Response(html, {
         status: asset.status,
         statusText: asset.statusText,
         headers,
     });
 }
 
-function jsonResponse(body, status, env, request, extraHeaders) {
-    const headers = {
+function robotsTxtResponse() {
+    return new Response(ROBOTS_TXT, {
+        status: 200,
+        headers: {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'X-Robots-Tag': ROBOTS_TAG,
+            'Cache-Control': 'public, max-age=300',
+        },
+    });
+}
+
+function headIfNeeded(request, response) {
+    if (!request || request.method !== 'HEAD') return response;
+    return new Response(null, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+    });
+}
+
+// Assets the platform would have served before the worker. run_worker_first
+// sends them here so the robots header is on the bytes we return.
+async function serveBoundAsset(request, env) {
+    const assets = env?.ASSETS;
+    if (!assets || typeof assets.fetch !== 'function') return null;
+    let asset;
+    try {
+        asset = await assets.fetch(new Request(request.url, {
+            method: 'GET',
+            headers: request.headers,
+        }));
+    } catch {
+        return null;
+    }
+    if (!asset || asset.status === 404) return null;
+    const headers = new Headers(asset.headers);
+    headers.set('X-Robots-Tag', ROBOTS_TAG);
+    const type = headers.get('Content-Type') || '';
+    if (!/html/i.test(type)) {
+        return new Response(asset.body, {
+            status: asset.status,
+            statusText: asset.statusText,
+            headers,
+        });
+    }
+    const html = injectRobotsMeta(await asset.text());
+    return new Response(html, {
+        status: asset.status,
+        statusText: asset.statusText,
+        headers,
+    });
+}
+
+function jsonResponse(body, status, env, request, extraHeaders, cookies) {
+    const headers = new Headers({
         'Content-Type': 'application/json',
         ...corsHeaders(env, request),
         ...(extraHeaders || {}),
-    };
-    const method = request && request.method;
-    if ((method === 'GET' || method === 'POST') && PRIVATE_NO_STORE.has(new URL(request.url).pathname)) {
-        headers['Cache-Control'] = 'private, no-store';
+    });
+    headers.set('X-Robots-Tag', ROBOTS_TAG);
+    if (request) {
+        let path = '';
+        try { path = new URL(request.url).pathname; } catch { path = ''; }
+        const method = request.method;
+        if ((method === 'GET' || method === 'POST' || method === 'HEAD') && isPrivateNoStore(path)) {
+            headers.set('Cache-Control', 'private, no-store');
+        }
+    }
+    if (Array.isArray(cookies)) {
+        for (const cookie of cookies) headers.append('Set-Cookie', cookie);
     }
     return new Response(JSON.stringify(body), { status, headers });
 }
