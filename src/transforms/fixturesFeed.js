@@ -127,13 +127,17 @@ const STATUS_RANK = {
     Cancelled: 3,
 };
 
-const LIVE_TOKENS = new Set(['live', 'inplay', 'inprogress']);
-const FINISHED_TOKENS = new Set(['finished', 'ended', 'complete', 'completed', 'final']);
-const WALKOVER_TOKENS = new Set(['walkover', 'wo']);
-const RETIRED_TOKENS = new Set(['retired', 'retirement', 'ret']);
-const CANCEL_TOKENS = new Set(['cancelled', 'canceled', 'abandoned']);
-const DELAY_TOKENS = new Set(['delayed', 'postponed', 'suspended', 'interrupted']);
-const NOT_STARTED_TOKENS = new Set(['notstarted', 'upcoming', 'scheduled']);
+// Highest precedence wins when one upstream string contains several words
+// ('Finished (retired)' is retired, not finished).
+const FEED_CATEGORY_RANK = {
+    cancelled: 7,
+    walkover: 6,
+    retired: 5,
+    finished: 4,
+    delayed: 3,
+    live: 2,
+    notstarted: 1,
+};
 
 const PRIVATE_ROW_FIELDS = new Set([
     'session', 'sessionid', 'sessiontoken',
@@ -147,28 +151,68 @@ const PRIVATE_ROW_FIELDS = new Set([
 // accepted; a JSON cache row cannot set this symbol.
 const TRUSTED_START = Symbol('tw.fixtureTrustedStart');
 
-function compactStatus(value) {
+function foldLabel(value) {
     return String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function hasToken(tokens, set) {
-    return tokens.some(token => set.has(token));
+// Split on punctuation so 'Ret.', 'W/O', and 'Retired - player1' yield words.
+// `w/o` is rewritten first so the slash does not leave two stray letters.
+function statusWords(value) {
+    if (value == null || value === '') return [];
+    const text = String(value).toLowerCase().replace(/w\s*\/\s*o/g, ' walkover ');
+    return text.split(/[^a-z0-9]+/).filter(Boolean);
 }
 
-function statusTokens(overlay) {
-    const tokens = [];
-    if (!overlay || typeof overlay !== 'object') return tokens;
-    for (const value of [
+function wordsInclude(words, list) {
+    return words.some(word => list.includes(word));
+}
+
+function hasPhrase(words, first, second) {
+    return words.some((word, index) => word === first && words[index + 1] === second);
+}
+
+function categoryOfWords(words) {
+    if (!words.length) return '';
+    let best = '';
+    let rank = 0;
+    const consider = (name, matched) => {
+        if (matched && FEED_CATEGORY_RANK[name] > rank) {
+            best = name;
+            rank = FEED_CATEGORY_RANK[name];
+        }
+    };
+    consider('cancelled', wordsInclude(words, ['cancelled', 'canceled', 'abandoned']));
+    consider('walkover', wordsInclude(words, ['walkover', 'wo']) || hasPhrase(words, 'walk', 'over'));
+    consider('retired', wordsInclude(words, ['retired', 'retirement', 'ret']));
+    consider('finished', wordsInclude(words, ['finished', 'ended', 'complete', 'completed', 'final']));
+    consider('delayed', wordsInclude(words, ['delayed', 'postponed', 'suspended', 'interrupted']));
+    consider('live', wordsInclude(words, ['live', 'inplay', 'inprogress'])
+        || hasPhrase(words, 'in', 'play')
+        || hasPhrase(words, 'in', 'progress'));
+    consider('notstarted', wordsInclude(words, ['notstarted', 'upcoming', 'scheduled'])
+        || hasPhrase(words, 'not', 'started'));
+    return best;
+}
+
+function bestFeedCategory(overlay, { skipStatus = false } = {}) {
+    if (!overlay || typeof overlay !== 'object') return '';
+    const fields = [
         overlay.statusText,
         overlay.rawStatus,
         overlay.eventStatus,
         overlay.event_status,
-        overlay.status,
-    ]) {
-        const token = compactStatus(value);
-        if (token) tokens.push(token);
+    ];
+    if (!skipStatus) fields.push(overlay.status);
+    let best = '';
+    let rank = 0;
+    for (const value of fields) {
+        const category = categoryOfWords(statusWords(value));
+        if (category && FEED_CATEGORY_RANK[category] > rank) {
+            best = category;
+            rank = FEED_CATEGORY_RANK[category];
+        }
     }
-    return tokens;
+    return best;
 }
 
 function sideKey(row, side) {
@@ -249,7 +293,7 @@ function recordedWinnerKey(fixture, overlay) {
     for (const raw of raws) {
         if (raw == null || raw === '') continue;
         const text = String(raw).trim();
-        const folded = compactStatus(text);
+        const folded = foldLabel(text);
         if (folded === 'player1' || folded === 'firstplayer' || folded === 'first') return p1;
         if (folded === 'player2' || folded === 'secondplayer' || folded === 'second') return p2;
         if (p1 && text === p1) return p1;
@@ -270,34 +314,58 @@ function knownStatus(status) {
     return Object.prototype.hasOwnProperty.call(STATUS_RANK, status) ? status : 'Not Started';
 }
 
-function isTerminal(status) {
-    return status === 'Finished' || status === 'Walkover' || status === 'Cancelled';
-}
-
 function holdingStatus(baseStatus) {
     return baseStatus === 'Delayed' ? 'Delayed' : 'Live';
 }
 
-// Upstream text first. Finished is never emitted from the word alone:
-// a recorded winner is required, and a winner with no sets is a Walkover
-// unless the text already said Walkover or Retired.
+// Not part of the JSON payload. Distinguishes a feed that said walkover
+// (sticky) from a walkover inferred because a winner had no set scores.
+const WALKOVER_KIND = Symbol('tw.walkoverKind');
+
+export function walkoverKindOf(row) {
+    const kind = row?.[WALKOVER_KIND];
+    return kind === 'text' || kind === 'inferred' ? kind : '';
+}
+
+export function tagWalkoverKind(row, kind) {
+    if (!row || typeof row !== 'object') return row;
+    if (kind === 'text' || kind === 'inferred') {
+        Object.defineProperty(row, WALKOVER_KIND, { value: kind, enumerable: false });
+    }
+    return row;
+}
+
+// Upstream text first, by precedence: cancelled/abandoned > walkover >
+// retired > finished > delayed/suspended/interrupted > live > not started.
+// Finished is never emitted from the word alone. A winner with no sets is
+// an inferred Walkover unless the feed text itself said walkover or retired.
 function classifyOverlay(baseStatus, fixture, overlay) {
-    const tokens = statusTokens(overlay);
     const scores = scoreListOf(overlay?.setScores);
-    const winner = recordedWinnerKey(fixture, overlay);
+    const winner = recordedWinnerKey(fixture, overlay) || knownWinner(fixture) || knownWinner(overlay);
+    const replay = walkoverKindOf(overlay);
+    if (replay === 'text') {
+        return {
+            status: 'Walkover',
+            winner,
+            scores: [],
+            feedWalkover: true,
+            currentGame: null,
+        };
+    }
+    const category = bestFeedCategory(overlay, { skipStatus: replay === 'inferred' });
+    const feedWalkover = category === 'walkover';
     let status = 'Not Started';
 
-    if (hasToken(tokens, CANCEL_TOKENS)) status = 'Cancelled';
-    else if (hasToken(tokens, WALKOVER_TOKENS)) status = 'Walkover';
-    else if (hasToken(tokens, RETIRED_TOKENS)) {
-        status = winner ? 'Finished' : holdingStatus(baseStatus);
-    } else if (hasToken(tokens, DELAY_TOKENS)) status = 'Delayed';
-    else if (hasToken(tokens, LIVE_TOKENS)) status = 'Live';
-    else if (hasToken(tokens, FINISHED_TOKENS)) {
+    if (category === 'cancelled') status = 'Cancelled';
+    else if (category === 'walkover') status = 'Walkover';
+    else if (category === 'retired') status = winner ? 'Finished' : holdingStatus(baseStatus);
+    else if (category === 'delayed') status = 'Delayed';
+    else if (category === 'live') status = 'Live';
+    else if (category === 'finished') {
         if (!winner) status = holdingStatus(baseStatus);
         else if (!scores.length) status = 'Walkover';
         else status = 'Finished';
-    } else if (hasToken(tokens, NOT_STARTED_TOKENS)) status = 'Not Started';
+    } else if (category === 'notstarted') status = 'Not Started';
     else if (overlay?.isLive === true) status = 'Live';
     else if (winner && !scores.length) status = 'Walkover';
     else if (winner && scores.length) status = 'Finished';
@@ -306,6 +374,7 @@ function classifyOverlay(baseStatus, fixture, overlay) {
         status,
         winner,
         scores,
+        feedWalkover,
         currentGame: overlay?.currentGame,
     };
 }
@@ -341,21 +410,54 @@ function projectStatus(row, status, classified) {
     return next;
 }
 
+function kindFor(status, feedWalkover) {
+    if (status !== 'Walkover') return '';
+    return feedWalkover ? 'text' : 'inferred';
+}
+
 function mergeOne(row, overlay, now) {
     const baseStatus = knownStatus(row?.status);
+    const baseKind = walkoverKindOf(row);
     const classified = classifyOverlay(baseStatus, row, overlay);
     const startsAtUtc = preferStart(row?.startsAtUtc, overlay, now);
-    const baseRank = STATUS_RANK[baseStatus];
-    const nextRank = STATUS_RANK[classified.status] ?? 0;
+    const keep = () => tagWalkoverKind({ ...row, startsAtUtc }, baseKind);
 
-    // Finished, Walkover, and Cancelled stay put. Live and Delayed do not
-    // fall back to Not Started, or to anything earlier than themselves.
-    if ((isTerminal(baseStatus) && classified.status !== baseStatus) || nextRank < baseRank) {
-        return { ...row, startsAtUtc };
+    // Cancelled sticks. A new cancelled feed also wins over a walkover.
+    if (baseStatus === 'Cancelled') return keep();
+    if (classified.status === 'Cancelled') {
+        const next = projectStatus(row, 'Cancelled', classified);
+        next.startsAtUtc = startsAtUtc;
+        return next;
     }
+
+    // Only a walkover the feed actually named is sticky. Scores must not
+    // turn it into Finished, in either merge order.
+    if (baseKind === 'text') return keep();
+    if (classified.feedWalkover) {
+        const next = projectStatus(row, 'Walkover', classified);
+        next.startsAtUtc = startsAtUtc;
+        return tagWalkoverKind(next, 'text');
+    }
+
+    // A scored Finished stays Finished. An inferred walkover must not erase it.
+    if (baseStatus === 'Finished' && classified.status !== 'Finished') return keep();
+
+    // Winner + no sets was only a guess. Set scores from either cache promote it.
+    if (baseKind === 'inferred' && classified.status === 'Finished' && classified.scores.length) {
+        const next = projectStatus(row, 'Finished', classified);
+        next.startsAtUtc = startsAtUtc;
+        return next;
+    }
+    if (baseStatus === 'Walkover' && baseKind === 'inferred') return keep();
+
+    const baseRank = STATUS_RANK[baseStatus] ?? 0;
+    const nextRank = STATUS_RANK[classified.status] ?? 0;
+    // Live and Delayed do not fall back to Not Started.
+    if (nextRank < baseRank) return keep();
+
     const projected = projectStatus(row, classified.status, classified);
     projected.startsAtUtc = startsAtUtc;
-    return projected;
+    return tagWalkoverKind(projected, kindFor(projected.status, classified.feedWalkover));
 }
 
 function isPrivateField(key) {
@@ -426,11 +528,12 @@ export function applyFixtureOverlay(rows, overlayRows, { now = new Date(), statu
     const asOf = typeof statusAsOf === 'string' ? statusAsOf : '';
     return list.map(row => {
         if (!row || typeof row !== 'object') return row;
-        let next = { ...row };
+        let next = tagWalkoverKind({ ...row }, walkoverKindOf(row));
         for (const overlay of overlaysFor(row, byKey)) {
             next = mergeOne(next, overlay, now);
         }
+        const kind = walkoverKindOf(next);
         next.statusAsOf = asOf;
-        return stripPrivate(next);
+        return tagWalkoverKind(stripPrivate(next), kind);
     });
 }

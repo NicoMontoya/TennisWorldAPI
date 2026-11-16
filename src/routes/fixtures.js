@@ -6,9 +6,11 @@ import {
     applyFixtureOverlay,
     fixtureCompositeKey,
     normalizeFixturesFeed,
+    tagWalkoverKind,
+    walkoverKindOf,
     withTrustedStart,
 } from '../transforms/fixturesFeed.js';
-import { dedupeFixtures, orderFixturesByTier, selectTourTarget } from '../transforms/fixtureTier.js';
+import { dedupeFixtures, fixtureTier, orderFixturesByTier, selectTourTarget } from '../transforms/fixtureTier.js';
 import { readAsOf, tagAsOf } from '../asOf.js';
 import { DRAWS_CACHE_RESOURCE } from '../officialDraw.js';
 import { readFixtures, readTournaments, rememberFixtures } from '../d1Store.js';
@@ -134,6 +136,10 @@ export async function handleFixtures(request, env) {
     const cacheKey = ['fixtures5', tour, tournamentKey || 'all', dateStart || '', dateStop || ''];
     const query = { tour, tournamentKey, dateStart, dateStop };
 
+    // Repeat views within a minute skip KV. The body is the public merge only.
+    const edged = await readMergedEdge(query);
+    if (edged) return edged;
+
     let cached = null;
     try {
         cached = await cache.get(env, ...cacheKey);
@@ -229,6 +235,7 @@ function rememberStatuses(tour, rows) {
             currentGame: row.currentGame ?? null,
         };
         withTrustedStart(saved, row.startsAtUtc);
+        tagWalkoverKind(saved, walkoverKindOf(row));
         statusMemory.set(id, saved);
     }
 }
@@ -266,19 +273,75 @@ function drawRows(envelope, tournamentKey) {
     return out;
 }
 
-function tournamentIds(query, rows) {
+export const MAX_FIXTURE_DRAW_READS = 5;
+export const FIXTURE_OVERLAY_EDGE_TTL = 60;
+
+function isTourRow(row) {
+    if (row?.tier === 'tour') return true;
+    if (row?.tier === 'challenger' || row?.tier === 'itf') return false;
+    return fixtureTier({
+        tournamentName: row?.tournamentName,
+        eventType: row?.eventType,
+    }) === 'tour';
+}
+
+// Requested tournamentKey first, then tour-tier events already on the page.
+// Hard stop at 5 so an unauthenticated fixtures view cannot fan out draws.
+function drawTournamentIds(query, rows) {
     const ids = [];
     const seen = new Set();
     const add = (value) => {
-        if (value == null || value === '' || ids.length >= 40) return;
+        if (value == null || value === '' || ids.length >= MAX_FIXTURE_DRAW_READS) return;
         const id = String(value);
         if (seen.has(id)) return;
         seen.add(id);
         ids.push(id);
     };
     add(query?.tournamentKey);
-    for (const row of rows || []) add(row?.tournamentKey);
+    for (const row of rows || []) {
+        if (!isTourRow(row)) continue;
+        add(row.tournamentKey);
+    }
     return ids;
+}
+
+function overlayEdgeParts(query) {
+    return [
+        'fixtures-overlay',
+        query.tour,
+        query.tournamentKey || 'all',
+        query.dateStart || '',
+        query.dateStop || '',
+    ];
+}
+
+async function readMergedEdge(query) {
+    try {
+        const hit = await cache.getEdge(...overlayEdgeParts(query));
+        const data = hit?.data;
+        if (Array.isArray(data)) return data;
+        if (data && Array.isArray(data.rows)) {
+            if (typeof data.asOf === 'string' && data.asOf) tagAsOf(data.rows, data.asOf);
+            return data.rows;
+        }
+    } catch { /* edge miss is not an error */ }
+    return null;
+}
+
+async function writeMergedEdge(query, rows, asOf) {
+    if (!Array.isArray(rows)) return;
+    // JSON clone drops symbols and anything that is not public data.
+    let value;
+    try {
+        value = JSON.parse(JSON.stringify(rows));
+    } catch {
+        return;
+    }
+    if (!Array.isArray(value)) return;
+    const stored = asOf ? { rows: value, asOf } : value;
+    try {
+        await cache.setEdge(FIXTURE_OVERLAY_EDGE_TTL, stored, ...overlayEdgeParts(query));
+    } catch { /* edge put is already fail-soft */ }
 }
 
 async function readCache(env, parts) {
@@ -317,7 +380,7 @@ async function loadCachedOverlay(env, query, rows) {
         const envelope = await readCache(env, parts);
         take(envelope, livescoreRows(envelope));
     }
-    for (const tid of tournamentIds(query, rows)) {
+    for (const tid of drawTournamentIds(query, rows)) {
         const envelope = await readCache(env, [DRAWS_CACHE_RESOURCE, tid, tour]);
         take(envelope, drawRows(envelope, tid));
     }
@@ -346,5 +409,6 @@ async function deliverFixtures(env, query, rows) {
         next = Array.isArray(rows) ? applyFixtureOverlay(rows, [], { statusAsOf: '' }) : [];
     }
     if (asOf) tagAsOf(next, asOf);
+    await writeMergedEdge(query, next, asOf);
     return next;
 }

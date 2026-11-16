@@ -323,6 +323,82 @@ describe('fixture livescore overlay', () => {
         expect(retiredNoWinner.status).not.toBe('Finished');
     });
 
+    it('upgrades an inferred walkover to Finished when scores arrive, in either order', () => {
+        const inferred = overlay({
+            status: 'Finished',
+            winner: '2072',
+            setScores: [],
+        });
+        const scored = overlay({
+            status: 'Finished',
+            winner: '2072',
+            setScores: ['6-4', '6-3'],
+        });
+        const scoresFirst = merge(fixture(), [scored, inferred]);
+        const guessFirst = merge(fixture(), [inferred, scored]);
+        expect(scoresFirst).toMatchObject({
+            status: 'Finished',
+            winner: '2072',
+            setScores: ['6-4', '6-3'],
+            isLive: false,
+        });
+        expect(guessFirst).toMatchObject({
+            status: 'Finished',
+            winner: '2072',
+            setScores: ['6-4', '6-3'],
+            isLive: false,
+        });
+
+        const firstSight = merge(fixture(), inferred);
+        expect(firstSight.status).toBe('Walkover');
+        const later = merge(firstSight, scored);
+        expect(later).toMatchObject({ status: 'Finished', setScores: ['6-4', '6-3'], winner: '2072' });
+    });
+
+    it('keeps a feed-text walkover sticky when scores arrive, in either order', () => {
+        const named = overlay({
+            status: 'Finished',
+            statusText: 'Walkover (W/O)',
+            winner: '2072',
+            setScores: [],
+        });
+        const scored = overlay({
+            status: 'Finished',
+            winner: '2072',
+            setScores: ['6-4', '6-2'],
+        });
+        expect(merge(fixture(), [named, scored]).status).toBe('Walkover');
+        expect(merge(fixture(), [scored, named])).toMatchObject({ status: 'Walkover', setScores: [] });
+        const stuck = merge(merge(fixture(), named), scored);
+        expect(stuck.status).toBe('Walkover');
+        expect(stuck.setScores).toEqual([]);
+    });
+
+    it('classifies real-world status text by precedence', () => {
+        const table = [
+            ['Retired - player1', { winner: '2072', setScores: ['6-4', '1-0'] }, 'Finished', ['6-4', '1-0']],
+            ['Walkover (W/O)', { winner: '2072', setScores: ['6-0', '6-0'] }, 'Walkover', []],
+            ['W/O', { winner: '2072', setScores: [] }, 'Walkover', []],
+            ['Ret.', { winner: '2072', setScores: ['6-3', '2-1'] }, 'Finished', ['6-3', '2-1']],
+            ['Finished (retired)', { winner: '2072', setScores: ['7-5', '2-1'] }, 'Finished', ['7-5', '2-1']],
+            ['Interrupted', {}, 'Delayed', []],
+            ['Suspended', {}, 'Delayed', []],
+            ['Postponed', {}, 'Delayed', []],
+            ['Cancelled', {}, 'Cancelled', []],
+            ['Canceled', {}, 'Cancelled', []],
+            ['Abandoned', {}, 'Cancelled', []],
+            ['Cancelled/Canceled', {}, 'Cancelled', []],
+            ['Live - walkover', { winner: '2072', setScores: ['6-4'] }, 'Walkover', []],
+            ['Finished - interrupted', { winner: '2072', setScores: ['6-4', '6-4'] }, 'Finished', ['6-4', '6-4']],
+        ];
+        for (const [text, extra, status, setScores] of table) {
+            const row = merge(fixture(), overlay({ status: text, statusText: text, ...extra }));
+            expect(row.status, text).toBe(status);
+            expect(row.setScores, text).toEqual(setScores);
+            expect(row.isLive, text).toBe(false);
+        }
+    });
+
     it('serves the fixture unchanged aside from an empty statusAsOf when nothing is cached', () => {
         const row = fixture({ startsAtUtc: '2026-11-16T18:00:00.000Z', time: '18:00' });
         const [out] = applyFixtureOverlay([row], null, { now: NOW, statusAsOf: '' });
