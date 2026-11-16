@@ -36,6 +36,7 @@ import {
 } from './routes/auth.js';
 import { handleCreateInvite, handleRevokeInvite, handleListInvites } from './routes/invites.js';
 import { handleFavorites, handleFavoritesToggle }              from './routes/favorites.js';
+import { handlePicksOpen, handlePicksSave, handlePicksMine, handleLeaderboard } from './routes/picks.js';
 import { handlePredict }      from './routes/predict.js';
 import { handleBracketSave, handleBracketMine, handleBracketLeaders, handleBracketPublic } from './routes/userBrackets.js';
 
@@ -65,6 +66,9 @@ const GET_ROUTES = {
     '/api/bracket/mine':      handleBracketMine,
     '/api/bracket/leaders':   handleBracketLeaders,
     '/api/bracket/public':    handleBracketPublic,
+    '/api/picks/open':        handlePicksOpen,
+    '/api/picks/mine':        handlePicksMine,
+    '/api/leaderboard':       handleLeaderboard,
 };
 
 // ── Route table (POST) ────────────────────────────────────────────────────────
@@ -80,6 +84,7 @@ const POST_ROUTES = {
     '/api/admin/invites/list':    handleListInvites,
     '/api/admin/members/revoke':  handleAdminRevokeMember,
     '/api/favorites/toggle':          handleFavoritesToggle,
+    '/api/picks':                     handlePicksSave,
     '/api/bracket/save':              handleBracketSave,
     '/api/admin/import-rank-history': handleImportRankHistory,
     '/api/admin/import-rankings-history': handleImportRankingsHistory,
@@ -298,11 +303,17 @@ function errorResponse(err, request, env, pathname) {
     const status = err.status || 500;
     // QuotaStopError's message is already generic. Force it anyway so a
     // remaining count or stop flag can never reach the client.
-    const extra = livescoreFetchedAtHeaders(
-        pathname,
-        request,
-        thrownLivescoreFetchedAt(request),
-    );
+    const extra = {
+        ...(livescoreFetchedAtHeaders(
+            pathname,
+            request,
+            thrownLivescoreFetchedAt(request),
+        ) || {}),
+    };
+    const retryAfter = Number(err.retryAfter);
+    if (Number.isFinite(retryAfter) && retryAfter > 0) {
+        extra['Retry-After'] = String(Math.ceil(retryAfter));
+    }
     return jsonResponse({ ok: false, error: message }, status, env, request, extra);
 }
 

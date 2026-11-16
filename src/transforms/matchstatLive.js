@@ -208,6 +208,15 @@ export function resolveMatchKey(event, coreMatch) {
     return null;
 }
 
+function finiteStartTimestamp(value) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value.trim())) {
+        const n = Number(value);
+        if (Number.isFinite(n)) return n;
+    }
+    return null;
+}
+
 export function mapLiveEvent(event, coreMatch, extras = {}) {
     const parsed = parseMatchId(event?.matchId);
     if (!parsed) return null;
@@ -215,8 +224,11 @@ export function mapLiveEvent(event, coreMatch, extras = {}) {
     if (!matchKey) return null;
 
     const { isLive, status } = mapLiveStatus(event.status);
-    const date = event.startTimestamp
-        ? new Date(Number(event.startTimestamp) * 1000).toISOString()
+    const startTimestamp = finiteStartTimestamp(event?.startTimestamp);
+    // A missing or zero clock still falls through to today's date. The raw
+    // number is kept either way so fixtures can reject an insane timestamp.
+    const date = startTimestamp
+        ? new Date(startTimestamp * 1000).toISOString()
         : extras.todayStr || null;
 
     const player1Name = event.participant1 || coreMatch?.player1?.name || '';
@@ -246,6 +258,10 @@ export function mapLiveEvent(event, coreMatch, extras = {}) {
         player1Seed:    seedOf(coreMatch, parsed.player1Id),
         player2Seed:    seedOf(coreMatch, parsed.player2Id),
         date,
+        // Raw word and unix start, so /api/fixtures can tell Walkover from
+        // Retired and can validate the clock. The board `status` above is unchanged.
+        ...(startTimestamp == null ? {} : { startTimestamp }),
+        ...(event?.status == null || event.status === '' ? {} : { statusText: String(event.status) }),
     }, {
         raw: rawType,
         tour: extras.tour,

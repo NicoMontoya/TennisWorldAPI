@@ -142,6 +142,18 @@ describe('matchKey resolution', () => {
         expect(mapped.roundId).toBe(12);
         expect(mapped.player1Seed).toBe(1);
         expect(mapped.eventType).toBe('ATP Singles');
+        expect(mapped.startTimestamp).toBe(1757180000);
+        expect(mapped.statusText).toBe('InPlay');
+    });
+
+    it('keeps Walkover text beside the board status so fixtures can tell it from Finished', () => {
+        const mapped = mapLiveEvent(
+            { ...inPlay, status: 'Walkover', score: '' },
+            { id: 555, player1Id: 2072, player2Id: 2315, roundId: 12 },
+        );
+        expect(mapped.status).toBe('Finished');
+        expect(mapped.statusText).toBe('Walkover');
+        expect(mapped.startTimestamp).toBe(inPlay.startTimestamp);
     });
 
     it('allowlists MatchStat tourType and omits unknown categories', () => {
