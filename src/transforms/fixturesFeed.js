@@ -194,6 +194,11 @@ function categoryOfWords(words) {
     return best;
 }
 
+/** Word category of a feed row: cancelled, walkover, retired, finished, delayed, live, notstarted, or ''. */
+export function matchFeedCategory(row) {
+    return bestFeedCategory(row);
+}
+
 function bestFeedCategory(overlay, { skipStatus = false } = {}) {
     if (!overlay || typeof overlay !== 'object') return '';
     const fields = [

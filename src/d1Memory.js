@@ -1,6 +1,6 @@
 // In-memory D1 double for tests. Understands the statements d1Store.js sends.
 
-const TABLES = ['tournaments', 'draws', 'fixtures', 'standings', 'd1_write_ledger', 'api_tennis_lists', 'call_tally', 'invites'];
+const TABLES = ['tournaments', 'draws', 'fixtures', 'standings', 'd1_write_ledger', 'api_tennis_lists', 'call_tally', 'invites', 'picks'];
 const PK = {
     tournaments: ['tour', 'tournament_key'],
     draws: ['tour', 'tournament_key'],
@@ -10,6 +10,7 @@ const PK = {
     api_tennis_lists: ['resource', 'tour', 'natural_key'],
     call_tally: ['provider', 'utc_day'],
     invites: ['hash'],
+    picks: ['member_id', 'match_key'],
 };
 
 function claimCallTally(tables, args) {
@@ -48,7 +49,71 @@ export function createMemoryD1() {
         else list.push({ ...row });
     }
 
+    function findPick(memberId, matchKey) {
+        return tables.picks.find(row => row.member_id === memberId && row.match_key === matchKey);
+    }
+
     function exec(sql, args) {
+        // Mirrors the picks upsert: the lock predicate is in the statement.
+        // A locked row, or a lock_at that is not still ahead of now, is unchanged.
+        if (sql.startsWith('INSERT INTO picks')) {
+            const [
+                memberId, matchKey, playerKey, createdAt, updatedAt, lockAt, tour,
+                lockAtWhere, nowInsert, nowUpdate, nowStored,
+            ] = args;
+            const existing = findPick(memberId, matchKey);
+            const stillOpen = Number(lockAtWhere) > Number(nowInsert);
+            if (!existing) {
+                if (!stillOpen) return { meta: { changes: 0 } };
+                tables.picks.push({
+                    member_id: memberId,
+                    match_key: matchKey,
+                    picked_player_key: playerKey,
+                    created_at: createdAt,
+                    updated_at: updatedAt,
+                    locked_at: null,
+                    lock_at: lockAt,
+                    result: 'pending',
+                    rank_gap: null,
+                    player1_key: '',
+                    player2_key: '',
+                    scoreless_seen: 0,
+                    void_reason: '',
+                    tour,
+                });
+                return { meta: { changes: 1 } };
+            }
+            if (existing.locked_at != null) return { meta: { changes: 0 } };
+            if (!(Number(lockAt) > Number(nowUpdate))) return { meta: { changes: 0 } };
+            if (!(Number(existing.lock_at) > Number(nowStored))) return { meta: { changes: 0 } };
+            if (existing.picked_player_key !== playerKey) existing.updated_at = updatedAt;
+            existing.picked_player_key = playerKey;
+            existing.lock_at = lockAt;
+            existing.tour = tour;
+            return { meta: { changes: 1 } };
+        }
+        if (sql.startsWith('UPDATE picks SET locked_at')) {
+            const [lockedAt, p1, p2, rankGap, memberId, matchKey] = args;
+            const row = findPick(memberId, matchKey);
+            if (!row || row.locked_at != null) return { meta: { changes: 0 } };
+            row.locked_at = lockedAt;
+            row.player1_key = p1;
+            row.player2_key = p2;
+            row.rank_gap = rankGap;
+            return { meta: { changes: 1 } };
+        }
+        if (sql.startsWith('UPDATE picks SET result')) {
+            const [result, seen, reason, memberId, matchKey, result2, seen2, reason2] = args;
+            const row = findPick(memberId, matchKey);
+            if (!row) return { meta: { changes: 0 } };
+            if (row.result === result2 && Number(row.scoreless_seen) === Number(seen2) && row.void_reason === reason2) {
+                return { meta: { changes: 0 } };
+            }
+            row.result = result;
+            row.scoreless_seen = seen;
+            row.void_reason = reason;
+            return { meta: { changes: 1 } };
+        }
         // One statement, no await. Concurrent claims of the same invite cannot
         // both observe uses < max_uses.
         if (sql.startsWith('UPDATE invites SET uses = uses + 1')) {
@@ -101,6 +166,15 @@ export function createMemoryD1() {
     }
 
     function query(sql, args) {
+        if (sql.includes('FROM picks')) {
+            let rows = tables.picks;
+            if (sql.includes('member_id = ?') && sql.includes('match_key = ?')) {
+                rows = rows.filter(row => row.member_id === args[0] && row.match_key === args[1]);
+            } else if (sql.includes('member_id = ?')) {
+                rows = rows.filter(row => row.member_id === args[0]);
+            }
+            return rows.map(row => ({ ...row }));
+        }
         if (sql.includes('FROM invites')) {
             let rows = tables.invites;
             if (sql.includes('WHERE hash = ?')) {

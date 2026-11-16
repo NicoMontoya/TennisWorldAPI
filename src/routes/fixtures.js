@@ -387,6 +387,21 @@ async function loadCachedOverlay(env, query, rows) {
     return { overlays, statusAsOf };
 }
 
+// Cache-only board for picks. Does not read or write statusMemory: that map
+// dies with the isolate, so a lock or a grade must not depend on it.
+export async function readFixtureBoard(env, query, rows, now = new Date()) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return { rows: Array.isArray(rows) ? rows : [], overlays: [] };
+    }
+    const { overlays, statusAsOf } = await loadCachedOverlay(env, query, rows);
+    const when = now instanceof Date ? now : new Date(now);
+    const merged = applyFixtureOverlay(rows, overlays, {
+        now: when,
+        statusAsOf: overlays.length ? statusAsOf : '',
+    });
+    return { rows: merged, overlays };
+}
+
 async function overlayFromCache(env, query, rows) {
     if (!Array.isArray(rows) || rows.length === 0) return Array.isArray(rows) ? rows : [];
     const { overlays, statusAsOf } = await loadCachedOverlay(env, query, rows);

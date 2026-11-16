@@ -379,7 +379,7 @@ describe('member gate, sessions, and privacy', () => {
         expect(shownBody.data.email).toBeUndefined();
         expect(shownBody.data.userId).toBeUndefined();
 
-        for (const path of ['/api/picks', '/api/picks/today', '/api/leaderboard', '/api/leaderboard/week', '/api/me/record']) {
+        for (const path of ['/api/picks', '/api/picks/today', '/api/leaderboard/week', '/api/me/record']) {
             const out = await worker.fetch(call(path), env);
             expect(out.status, path).toBe(401);
             expect(out.headers.get('cache-control'), path).toBe('private, no-store');

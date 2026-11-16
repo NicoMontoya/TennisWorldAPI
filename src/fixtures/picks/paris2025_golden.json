@@ -1,0 +1,1157 @@
+[
+ {
+  "match_num": "373",
+  "round": "F",
+  "winner": "Jannik Sinner",
+  "loser": "Felix Auger Aliassime",
+  "winner_rank": "2",
+  "loser_rank": "10",
+  "score": "6-4 7-6(4)",
+  "picks": {
+   "winner": "206173",
+   "loser": "200000",
+   "favorite": "206173",
+   "random": "200000"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "372",
+  "round": "SF",
+  "winner": "Felix Auger Aliassime",
+  "loser": "Alexander Bublik",
+  "winner_rank": "10",
+  "loser_rank": "16",
+  "score": "7-6(3) 6-4",
+  "picks": {
+   "winner": "200000",
+   "loser": "122330",
+   "favorite": "200000",
+   "random": "200000"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "371",
+  "round": "SF",
+  "winner": "Jannik Sinner",
+  "loser": "Alexander Zverev",
+  "winner_rank": "2",
+  "loser_rank": "3",
+  "score": "6-0 6-1",
+  "picks": {
+   "winner": "206173",
+   "loser": "100644",
+   "favorite": "206173",
+   "random": "100644"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "370",
+  "round": "QF",
+  "winner": "Felix Auger Aliassime",
+  "loser": "Valentin Vacherot",
+  "winner_rank": "10",
+  "loser_rank": "40",
+  "score": "6-2 6-2",
+  "picks": {
+   "winner": "200000",
+   "loser": "200473",
+   "favorite": "200000",
+   "random": "200000"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "369",
+  "round": "QF",
+  "winner": "Alexander Bublik",
+  "loser": "Alex De Minaur",
+  "winner_rank": "16",
+  "loser_rank": "6",
+  "score": "6-7(5) 6-4 7-5",
+  "picks": {
+   "winner": "122330",
+   "loser": "200282",
+   "favorite": "200282",
+   "random": "122330"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "368",
+  "round": "QF",
+  "winner": "Alexander Zverev",
+  "loser": "Daniil Medvedev",
+  "winner_rank": "3",
+  "loser_rank": "13",
+  "score": "2-6 6-3 7-6(5)",
+  "picks": {
+   "winner": "100644",
+   "loser": "106421",
+   "favorite": "100644",
+   "random": "100644"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "367",
+  "round": "QF",
+  "winner": "Jannik Sinner",
+  "loser": "Ben Shelton",
+  "winner_rank": "2",
+  "loser_rank": "7",
+  "score": "6-3 6-3",
+  "picks": {
+   "winner": "206173",
+   "loser": "210097",
+   "favorite": "206173",
+   "random": "210097"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "366",
+  "round": "R16",
+  "winner": "Valentin Vacherot",
+  "loser": "Cameron Norrie",
+  "winner_rank": "40",
+  "loser_rank": "31",
+  "score": "7-6(4) 6-4",
+  "picks": {
+   "winner": "200473",
+   "loser": "111815",
+   "favorite": "111815",
+   "random": "200473"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "365",
+  "round": "R16",
+  "winner": "Felix Auger Aliassime",
+  "loser": "Daniel Altmaier",
+  "winner_rank": "10",
+  "loser_rank": "50",
+  "score": "3-6 6-3 6-2",
+  "picks": {
+   "winner": "200000",
+   "loser": "127157",
+   "favorite": "200000",
+   "random": "200000"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "364",
+  "round": "R16",
+  "winner": "Alexander Bublik",
+  "loser": "Taylor Fritz",
+  "winner_rank": "16",
+  "loser_rank": "4",
+  "score": "7-6(5) 6-2",
+  "picks": {
+   "winner": "122330",
+   "loser": "126203",
+   "favorite": "126203",
+   "random": "122330"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "363",
+  "round": "R16",
+  "winner": "Alex De Minaur",
+  "loser": "Karen Khachanov",
+  "winner_rank": "6",
+  "loser_rank": "14",
+  "score": "6-2 6-2",
+  "picks": {
+   "winner": "200282",
+   "loser": "111575",
+   "favorite": "200282",
+   "random": "200282"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "362",
+  "round": "R16",
+  "winner": "Daniil Medvedev",
+  "loser": "Lorenzo Sonego",
+  "winner_rank": "13",
+  "loser_rank": "45",
+  "score": "3-6 7-6(5) 6-4",
+  "picks": {
+   "winner": "106421",
+   "loser": "132283",
+   "favorite": "106421",
+   "random": "132283"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "361",
+  "round": "R16",
+  "winner": "Alexander Zverev",
+  "loser": "Alejandro Davidovich Fokina",
+  "winner_rank": "3",
+  "loser_rank": "15",
+  "score": "6-2 6-4",
+  "picks": {
+   "winner": "100644",
+   "loser": "200221",
+   "favorite": "100644",
+   "random": "200221"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "360",
+  "round": "R16",
+  "winner": "Ben Shelton",
+  "loser": "Andrey Rublev",
+  "winner_rank": "7",
+  "loser_rank": "17",
+  "score": "7-6(6) 6-3",
+  "picks": {
+   "winner": "210097",
+   "loser": "126094",
+   "favorite": "210097",
+   "random": "210097"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "359",
+  "round": "R16",
+  "winner": "Jannik Sinner",
+  "loser": "Francisco Cerundolo",
+  "winner_rank": "2",
+  "loser_rank": "21",
+  "score": "7-5 6-1",
+  "picks": {
+   "winner": "206173",
+   "loser": "202103",
+   "favorite": "206173",
+   "random": "206173"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "358",
+  "round": "R32",
+  "winner": "Cameron Norrie",
+  "loser": "Carlos Alcaraz",
+  "winner_rank": "31",
+  "loser_rank": "1",
+  "score": "4-6 6-3 6-4",
+  "picks": {
+   "winner": "111815",
+   "loser": "207989",
+   "favorite": "207989",
+   "random": "111815"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "357",
+  "round": "R32",
+  "winner": "Valentin Vacherot",
+  "loser": "Arthur Rinderknech",
+  "winner_rank": "40",
+  "loser_rank": "29",
+  "score": "6-7(9) 6-3 6-4",
+  "picks": {
+   "winner": "200473",
+   "loser": "126239",
+   "favorite": "126239",
+   "random": "126239"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "356",
+  "round": "R32",
+  "winner": "Felix Auger Aliassime",
+  "loser": "Alexandre Muller",
+  "winner_rank": "10",
+  "loser_rank": "44",
+  "score": "5-7 7-6(5) 7-6(4)",
+  "picks": {
+   "winner": "200000",
+   "loser": "124186",
+   "favorite": "200000",
+   "random": "200000"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "355",
+  "round": "R32",
+  "winner": "Daniel Altmaier",
+  "loser": "Casper Ruud",
+  "winner_rank": "50",
+  "loser_rank": "9",
+  "score": "6-3 7-5",
+  "picks": {
+   "winner": "127157",
+   "loser": "134770",
+   "favorite": "134770",
+   "random": "127157"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "354",
+  "round": "R32",
+  "winner": "Taylor Fritz",
+  "loser": "Aleksandar Vukic",
+  "winner_rank": "4",
+  "loser_rank": "103",
+  "score": "7-6(4) 6-2",
+  "picks": {
+   "winner": "126203",
+   "loser": "126846",
+   "favorite": "126203",
+   "random": "126203"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "353",
+  "round": "R32",
+  "winner": "Alexander Bublik",
+  "loser": "Corentin Moutet",
+  "winner_rank": "16",
+  "loser_rank": "32",
+  "score": "6-3 7-5",
+  "picks": {
+   "winner": "122330",
+   "loser": "144895",
+   "favorite": "122330",
+   "random": "122330"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "352",
+  "round": "R32",
+  "winner": "Karen Khachanov",
+  "loser": "Joao Fonseca",
+  "winner_rank": "14",
+  "loser_rank": "28",
+  "score": "6-1 3-6 6-3",
+  "picks": {
+   "winner": "111575",
+   "loser": "211663",
+   "favorite": "111575",
+   "random": "211663"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "351",
+  "round": "R32",
+  "winner": "Alex De Minaur",
+  "loser": "Gabriel Diallo",
+  "winner_rank": "6",
+  "loser_rank": "42",
+  "score": "7-6(8) 4-6 6-3",
+  "picks": {
+   "winner": "200282",
+   "loser": "209113",
+   "favorite": "200282",
+   "random": "200282"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "350",
+  "round": "R32",
+  "winner": "Lorenzo Sonego",
+  "loser": "Lorenzo Musetti",
+  "winner_rank": "45",
+  "loser_rank": "8",
+  "score": "3-6 6-3 6-1",
+  "picks": {
+   "winner": "132283",
+   "loser": "207518",
+   "favorite": "207518",
+   "random": "132283"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "349",
+  "round": "R32",
+  "winner": "Daniil Medvedev",
+  "loser": "Grigor Dimitrov",
+  "winner_rank": "13",
+  "loser_rank": "38",
+  "score": "W/O",
+  "picks": {
+   "winner": "106421",
+   "loser": "105777",
+   "favorite": "106421",
+   "random": "106421"
+  },
+  "expected": {
+   "winner": null,
+   "loser": null,
+   "favorite": null,
+   "random": null
+  }
+ },
+ {
+  "match_num": "348",
+  "round": "R32",
+  "winner": "Alejandro Davidovich Fokina",
+  "loser": "Arthur Cazaux",
+  "winner_rank": "15",
+  "loser_rank": "62",
+  "score": "7-6(5) 6-4",
+  "picks": {
+   "winner": "200221",
+   "loser": "209070",
+   "favorite": "200221",
+   "random": "200221"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "347",
+  "round": "R32",
+  "winner": "Alexander Zverev",
+  "loser": "Camilo Ugo Carabelli",
+  "winner_rank": "3",
+  "loser_rank": "49",
+  "score": "6-7(5) 6-1 7-5",
+  "picks": {
+   "winner": "100644",
+   "loser": "200116",
+   "favorite": "100644",
+   "random": "200116"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "346",
+  "round": "R32",
+  "winner": "Ben Shelton",
+  "loser": "Flavio Cobolli",
+  "winner_rank": "7",
+  "loser_rank": "23",
+  "score": "7-6(4) 6-3",
+  "picks": {
+   "winner": "210097",
+   "loser": "207925",
+   "favorite": "210097",
+   "random": "207925"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "345",
+  "round": "R32",
+  "winner": "Andrey Rublev",
+  "loser": "Learner Tien",
+  "winner_rank": "17",
+  "loser_rank": "39",
+  "score": "6-4 6-4",
+  "picks": {
+   "winner": "126094",
+   "loser": "210530",
+   "favorite": "126094",
+   "random": "126094"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "344",
+  "round": "R32",
+  "winner": "Francisco Cerundolo",
+  "loser": "Miomir Kecmanovic",
+  "winner_rank": "21",
+  "loser_rank": "53",
+  "score": "7-5 1-6 7-6(4)",
+  "picks": {
+   "winner": "202103",
+   "loser": "200175",
+   "favorite": "202103",
+   "random": "202103"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "343",
+  "round": "R32",
+  "winner": "Jannik Sinner",
+  "loser": "Zizou Bergs",
+  "winner_rank": "2",
+  "loser_rank": "41",
+  "score": "6-4 6-2",
+  "picks": {
+   "winner": "206173",
+   "loser": "200267",
+   "favorite": "206173",
+   "random": "200267"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "342",
+  "round": "R64",
+  "winner": "Cameron Norrie",
+  "loser": "Sebastian Baez",
+  "winner_rank": "31",
+  "loser_rank": "43",
+  "score": "6-3 6-4",
+  "picks": {
+   "winner": "111815",
+   "loser": "202104",
+   "favorite": "111815",
+   "random": "111815"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "341",
+  "round": "R64",
+  "winner": "Arthur Rinderknech",
+  "loser": "Fabian Marozsan",
+  "winner_rank": "29",
+  "loser_rank": "48",
+  "score": "7-6(5) 7-6(4)",
+  "picks": {
+   "winner": "126239",
+   "loser": "206681",
+   "favorite": "126239",
+   "random": "126239"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "340",
+  "round": "R64",
+  "winner": "Valentin Vacherot",
+  "loser": "Jiri Lehecka",
+  "winner_rank": "40",
+  "loser_rank": "18",
+  "score": "6-1 6-3",
+  "picks": {
+   "winner": "200473",
+   "loser": "208103",
+   "favorite": "208103",
+   "random": "200473"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "339",
+  "round": "R64",
+  "winner": "Felix Auger Aliassime",
+  "loser": "Francisco Comesana",
+  "winner_rank": "10",
+  "loser_rank": "68",
+  "score": "6-7(2) 6-3 6-3",
+  "picks": {
+   "winner": "200000",
+   "loser": "207681",
+   "favorite": "200000",
+   "random": "207681"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "338",
+  "round": "R64",
+  "winner": "Alexandre Muller",
+  "loser": "Brandon Nakashima",
+  "winner_rank": "44",
+  "loser_rank": "33",
+  "score": "6-2 7-5",
+  "picks": {
+   "winner": "124186",
+   "loser": "206909",
+   "favorite": "206909",
+   "random": "124186"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "337",
+  "round": "R64",
+  "winner": "Daniel Altmaier",
+  "loser": "Marcos Giron",
+  "winner_rank": "50",
+  "loser_rank": "65",
+  "score": "6-2 7-6(5)",
+  "picks": {
+   "winner": "127157",
+   "loser": "106218",
+   "favorite": "127157",
+   "random": "127157"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "336",
+  "round": "R64",
+  "winner": "Aleksandar Vukic",
+  "loser": "Terence Atmane",
+  "winner_rank": "103",
+  "loser_rank": "69",
+  "score": "6-4 2-6 6-4",
+  "picks": {
+   "winner": "126846",
+   "loser": "209279",
+   "favorite": "209279",
+   "random": "126846"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "335",
+  "round": "R64",
+  "winner": "Corentin Moutet",
+  "loser": "Reilly Opelka",
+  "winner_rank": "32",
+  "loser_rank": "52",
+  "score": "3-6 7-5 6-1",
+  "picks": {
+   "winner": "144895",
+   "loser": "124187",
+   "favorite": "144895",
+   "random": "144895"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "334",
+  "round": "R64",
+  "winner": "Alexander Bublik",
+  "loser": "Alexei Popyrin",
+  "winner_rank": "16",
+  "loser_rank": "47",
+  "score": "6-4 6-3",
+  "picks": {
+   "winner": "122330",
+   "loser": "200615",
+   "favorite": "122330",
+   "random": "200615"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "333",
+  "round": "R64",
+  "winner": "Karen Khachanov",
+  "loser": "Ethan Quinn",
+  "winner_rank": "14",
+  "loser_rank": "71",
+  "score": "6-1 6-1",
+  "picks": {
+   "winner": "111575",
+   "loser": "210319",
+   "favorite": "111575",
+   "random": "210319"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "332",
+  "round": "R64",
+  "winner": "Joao Fonseca",
+  "loser": "Denis Shapovalov",
+  "winner_rank": "28",
+  "loser_rank": "24",
+  "score": "5-7 6-4 6-3",
+  "picks": {
+   "winner": "211663",
+   "loser": "133430",
+   "favorite": "133430",
+   "random": "133430"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "331",
+  "round": "R64",
+  "winner": "Gabriel Diallo",
+  "loser": "Tallon Griekspoor",
+  "winner_rank": "42",
+  "loser_rank": "25",
+  "score": "6-3 6-4",
+  "picks": {
+   "winner": "209113",
+   "loser": "134868",
+   "favorite": "134868",
+   "random": "134868"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "330",
+  "round": "R64",
+  "winner": "Lorenzo Sonego",
+  "loser": "Sebastian Korda",
+  "winner_rank": "45",
+  "loser_rank": "54",
+  "score": "6-2 6-3",
+  "picks": {
+   "winner": "132283",
+   "loser": "200624",
+   "favorite": "132283",
+   "random": "200624"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "329",
+  "round": "R64",
+  "winner": "Grigor Dimitrov",
+  "loser": "Giovanni Mpetshi Perricard",
+  "winner_rank": "38",
+  "loser_rank": "56",
+  "score": "7-6(5) 6-1",
+  "picks": {
+   "winner": "105777",
+   "loser": "208659",
+   "favorite": "105777",
+   "random": "208659"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "328",
+  "round": "R64",
+  "winner": "Daniil Medvedev",
+  "loser": "Jaume Munar",
+  "winner_rank": "13",
+  "loser_rank": "36",
+  "score": "6-1 6-3",
+  "picks": {
+   "winner": "106421",
+   "loser": "144719",
+   "favorite": "106421",
+   "random": "144719"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "327",
+  "round": "R64",
+  "winner": "Alejandro Davidovich Fokina",
+  "loser": "Valentin Royer",
+  "winner_rank": "15",
+  "loser_rank": "59",
+  "score": "4-6 6-1 6-4",
+  "picks": {
+   "winner": "200221",
+   "loser": "208316",
+   "favorite": "200221",
+   "random": "200221"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "326",
+  "round": "R64",
+  "winner": "Arthur Cazaux",
+  "loser": "Luciano Darderi",
+  "winner_rank": "62",
+  "loser_rank": "27",
+  "score": "7-6(5) 7-6(4)",
+  "picks": {
+   "winner": "209070",
+   "loser": "209260",
+   "favorite": "209260",
+   "random": "209070"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "325",
+  "round": "R64",
+  "winner": "Camilo Ugo Carabelli",
+  "loser": "Tomas Martin Etcheverry",
+  "winner_rank": "49",
+  "loser_rank": "58",
+  "score": "7-5 6-3",
+  "picks": {
+   "winner": "200116",
+   "loser": "144869",
+   "favorite": "200116",
+   "random": "200116"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "324",
+  "round": "R64",
+  "winner": "Flavio Cobolli",
+  "loser": "Tomas Machac",
+  "winner_rank": "23",
+  "loser_rank": "34",
+  "score": "6-1 6-4",
+  "picks": {
+   "winner": "207925",
+   "loser": "207830",
+   "favorite": "207925",
+   "random": "207925"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 1
+  }
+ },
+ {
+  "match_num": "323",
+  "round": "R64",
+  "winner": "Learner Tien",
+  "loser": "Nuno Borges",
+  "winner_rank": "39",
+  "loser_rank": "46",
+  "score": "6-2 7-6(7)",
+  "picks": {
+   "winner": "210530",
+   "loser": "132686",
+   "favorite": "210530",
+   "random": "132686"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "322",
+  "round": "R64",
+  "winner": "Andrey Rublev",
+  "loser": "Jacob Fearnley",
+  "winner_rank": "17",
+  "loser_rank": "78",
+  "score": "6-1 6-4",
+  "picks": {
+   "winner": "126094",
+   "loser": "207985",
+   "favorite": "126094",
+   "random": "207985"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "321",
+  "round": "R64",
+  "winner": "Francisco Cerundolo",
+  "loser": "Damir Dzumhur",
+  "winner_rank": "21",
+  "loser_rank": "63",
+  "score": "6-3 6-3",
+  "picks": {
+   "winner": "202103",
+   "loser": "106000",
+   "favorite": "202103",
+   "random": "106000"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "320",
+  "round": "R64",
+  "winner": "Miomir Kecmanovic",
+  "loser": "Aleksandar Kovacevic",
+  "winner_rank": "53",
+  "loser_rank": "64",
+  "score": "6-4 1-6 7-6(2)",
+  "picks": {
+   "winner": "200175",
+   "loser": "206499",
+   "favorite": "200175",
+   "random": "206499"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 1,
+   "random": 0
+  }
+ },
+ {
+  "match_num": "319",
+  "round": "R64",
+  "winner": "Zizou Bergs",
+  "loser": "Alex Michelsen",
+  "winner_rank": "41",
+  "loser_rank": "35",
+  "score": "6-3 2-6 6-2",
+  "picks": {
+   "winner": "200267",
+   "loser": "210506",
+   "favorite": "210506",
+   "random": "210506"
+  },
+  "expected": {
+   "winner": 1,
+   "loser": 0,
+   "favorite": 0,
+   "random": 0
+  }
+ }
+]
