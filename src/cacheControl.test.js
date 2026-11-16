@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import worker from './index.js';
+import { createMemoryD1 } from './d1Memory.js';
 
 const PRIVATE = 'private, no-store';
 
@@ -7,6 +8,7 @@ function mockEnv() {
     const store = new Map();
     return {
         CORS_ORIGIN: '*',
+        DB: createMemoryD1(),
         TENNIS_CACHE: {
             async get(key, type) {
                 const raw = store.get(key);
@@ -47,16 +49,30 @@ function installMockCaches() {
     return cache;
 }
 
-function req(path, { method = 'GET', body, token, ip } = {}) {
+function req(path, { method = 'GET', body, token, cookie, ip, secret, origin } = {}) {
+    const url = `https://example.test${path}`;
     const headers = {};
+    if (method === 'POST') {
+        headers['Content-Type'] = 'application/json';
+        if (origin !== null) headers.Origin = origin || new URL(url).origin;
+    }
     if (token) headers.Authorization = `Bearer ${token}`;
+    if (cookie) headers.Cookie = cookie;
     if (ip) headers['CF-Connecting-IP'] = ip;
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
-    return new Request(`https://example.test${path}`, {
+    if (secret) headers['x-admin-secret'] = secret;
+    return new Request(url, {
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
     });
+}
+
+function cookiePair(response) {
+    const lines = typeof response.headers.getSetCookie === 'function'
+        ? response.headers.getSetCookie()
+        : [response.headers.get('set-cookie')].filter(Boolean);
+    const line = lines.find(value => value && value.startsWith('__Host-tw_session=')) || '';
+    return line.split(';')[0];
 }
 
 async function expectPrivate(response, status) {
@@ -77,6 +93,8 @@ describe('per-user Cache-Control', () => {
         const cases = [
             ['GET', '/api/bracket/mine'],
             ['POST', '/api/bracket/save'],
+            ['GET', '/api/bracket/leaders'],
+            ['GET', '/api/bracket/public'],
             ['GET', '/api/auth/me'],
             ['POST', '/api/auth/update-profile'],
             ['POST', '/api/auth/change-password'],
@@ -97,7 +115,7 @@ describe('per-user Cache-Control', () => {
         }), env);
         await expectPrivate(badLogin, 400);
 
-        env.TENNIS_CACHE._store.set('_rl:login:203.0.113.9', '10');
+        env.TENNIS_CACHE._store.set('_rl:auth:203.0.113.9', '10');
         const limited = await worker.fetch(req('/api/auth/login', {
             method: 'POST',
             body: { email: 'ada@example.com', password: 'secret1' },
@@ -107,47 +125,64 @@ describe('per-user Cache-Control', () => {
 
         const broken = mockEnv();
         broken.TENNIS_CACHE.get = async () => { throw new Error('kv down'); };
-        const crashed = await worker.fetch(req('/api/bracket/mine', { token: 'not-a-session' }), broken);
+        const crashed = await worker.fetch(req('/api/bracket/mine', {
+            cookie: '__Host-tw_session=not-a-session-token',
+        }), broken);
         await expectPrivate(crashed, 500);
         expect(await crashed.json()).toEqual({ ok: false, error: 'kv down' });
 
         const saveCrashed = await worker.fetch(req('/api/bracket/save', {
             method: 'POST',
-            token: 'not-a-session',
+            cookie: '__Host-tw_session=not-a-session-token',
             body: {},
         }), broken);
         await expectPrivate(saveCrashed, 500);
     });
 
     it('sets the header on successful register, me, favorites, and bracket/mine', async () => {
+        env.ADMIN_SECRET = 'test-admin-secret';
+        const invited = await worker.fetch(req('/api/admin/invites', {
+            method: 'POST',
+            body: {},
+            secret: 'test-admin-secret',
+        }), env);
+        expect(invited.status).toBe(200);
+        const invite = await invited.json();
+
         const registered = await worker.fetch(req('/api/auth/register', {
             method: 'POST',
-            body: { firstName: 'Ada', lastName: 'Lovelace', email: 'ada@example.com', password: 'secret1' },
+            body: {
+                firstName: 'Ada',
+                lastName: 'Lovelace',
+                email: 'ada@example.com',
+                password: 'secret1',
+                inviteCode: invite.data.code,
+            },
         }), env);
         await expectPrivate(registered, 200);
-        const { data } = await registered.json();
-        expect(data.token).toBeTruthy();
+        const cookie = cookiePair(registered);
+        expect(cookie.startsWith('__Host-tw_session=')).toBe(true);
 
-        const me = await worker.fetch(req('/api/auth/me', { token: data.token }), env);
+        const me = await worker.fetch(req('/api/auth/me', { cookie }), env);
         await expectPrivate(me, 200);
 
-        const favorites = await worker.fetch(req('/api/favorites', { token: data.token }), env);
+        const favorites = await worker.fetch(req('/api/favorites', { cookie }), env);
         await expectPrivate(favorites, 200);
 
-        const mine = await worker.fetch(req('/api/bracket/mine', { token: data.token }), env);
+        const mine = await worker.fetch(req('/api/bracket/mine', { cookie }), env);
         await expectPrivate(mine, 200);
         expect(await mine.json()).toEqual({ ok: true, data: { brackets: [] } });
     });
 
     it('leaves public routes without Cache-Control', async () => {
         const leaders = await worker.fetch(req('/api/bracket/leaders'), env);
-        expect(leaders.status).toBe(400);
-        expect(leaders.headers.get('Cache-Control')).toBeNull();
+        expect(leaders.status).toBe(401);
+        expect(leaders.headers.get('Cache-Control')).toBe(PRIVATE);
         expect(leaders.headers.get('Content-Type')).toBe('application/json');
 
         const pub = await worker.fetch(req('/api/bracket/public'), env);
-        expect(pub.status).toBe(400);
-        expect(pub.headers.get('Cache-Control')).toBeNull();
+        expect(pub.status).toBe(401);
+        expect(pub.headers.get('Cache-Control')).toBe(PRIVATE);
 
         const hub = await worker.fetch(req('/api/hub?tour=ITF'), env);
         expect(hub.status).toBe(400);

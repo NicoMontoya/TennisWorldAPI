@@ -59,9 +59,10 @@ function get(path) {
 }
 
 function post(path, body, { secret } = {}) {
-    const headers = { 'Content-Type': 'application/json' };
+    const url = `https://tennisworld-api.nicomontoya.workers.dev${path}`;
+    const headers = { 'Content-Type': 'application/json', Origin: new URL(url).origin };
     if (secret) headers['x-admin-secret'] = secret;
-    return new Request(`https://tennisworld-api.nicomontoya.workers.dev${path}`, {
+    return new Request(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),

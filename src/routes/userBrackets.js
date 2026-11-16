@@ -3,8 +3,8 @@
 // ===================================
 // POST /api/bracket/save     — save the authed user's bracket for a tournament
 // GET  /api/bracket/mine     — the authed user's brackets (+ live scores)
-// GET  /api/bracket/leaders  — per-tournament leaderboard (public)
-// GET  /api/bracket/public   — one user's picks, read-only by publicId (public)
+// GET  /api/bracket/leaders  — per-tournament leaderboard (members)
+// GET  /api/bracket/public   — one user's picks, read-only by publicId (members)
 //
 // Design contract (increment-4 ISA):
 //   - User picks NEVER touch official draw data. This module writes only
@@ -17,7 +17,7 @@
 //   - Leaderboard/public payloads expose publicId + displayName only. Never
 //     emails (user ids are emails internally).
 
-import { getAuthUser, saveUser } from './auth.js';
+import { assertMember, saveUser } from './auth.js';
 import { handleDraws } from './draws.js';
 import { computeBracketScore, positionalKeyMap } from '../bracketScoring.js';
 
@@ -36,6 +36,8 @@ function bad(msg, status = 400) {
 }
 
 function displayNameOf(user) {
+    const named = (user.displayName || '').trim();
+    if (named) return named.slice(0, 24);
     const first = (user.firstName || '').trim();
     const last  = (user.lastName || '').trim();
     return (first + ' ' + (last ? last[0] + '.' : '')).trim() || 'Player';
@@ -63,8 +65,7 @@ function decidedWinners(rounds) {
 
 // ── POST /api/bracket/save ────────────────────────────────────────────────────
 export async function handleBracketSave(request, env) {
-    const user = await getAuthUser(request, env);
-    if (!user) bad('Unauthorized', 401);
+    const user = await assertMember(request, env);
 
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== 'object') bad('JSON body required');
@@ -174,8 +175,7 @@ export async function handleBracketSave(request, env) {
 // ?tour&tournamentKey → that single bracket (with picks). No params → list of
 // all the user's brackets with current scores.
 export async function handleBracketMine(request, env) {
-    const user = await getAuthUser(request, env);
-    if (!user) bad('Unauthorized', 401);
+    const user = await assertMember(request, env);
     const { searchParams } = new URL(request.url);
     const tk = searchParams.get('tournamentKey');
     const tour = (searchParams.get('tour') || 'ATP').toUpperCase();
@@ -208,6 +208,7 @@ export async function handleBracketMine(request, env) {
 
 // ── GET /api/bracket/leaders ──────────────────────────────────────────────────
 export async function handleBracketLeaders(request, env) {
+    await assertMember(request, env);
     const { searchParams } = new URL(request.url);
     const tk = searchParams.get('tournamentKey');
     const tour = (searchParams.get('tour') || 'ATP').toUpperCase();
@@ -258,6 +259,7 @@ export async function handleBracketLeaders(request, env) {
 
 // ── GET /api/bracket/public ───────────────────────────────────────────────────
 export async function handleBracketPublic(request, env) {
+    await assertMember(request, env);
     const { searchParams } = new URL(request.url);
     const publicId = searchParams.get('id') || '';
     const tk = searchParams.get('tournamentKey');
