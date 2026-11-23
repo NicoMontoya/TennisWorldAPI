@@ -2,9 +2,17 @@ import { cache } from '../cache.js';
 import { rapidAPI } from '../apiClient.js';
 import { TTL } from '../config.js';
 import { parseTour, parseTournamentKey } from '../security.js';
-import { normalizeFixturesFeed } from '../transforms/fixturesFeed.js';
-import { dedupeFixtures, orderFixturesByTier, selectTourTarget } from '../transforms/fixtureTier.js';
-import { tagAsOf } from '../asOf.js';
+import {
+    applyFixtureOverlay,
+    fixtureCompositeKey,
+    normalizeFixturesFeed,
+    tagWalkoverKind,
+    walkoverKindOf,
+    withTrustedStart,
+} from '../transforms/fixturesFeed.js';
+import { dedupeFixtures, fixtureTier, orderFixturesByTier, selectTourTarget } from '../transforms/fixtureTier.js';
+import { readAsOf, tagAsOf } from '../asOf.js';
+import { DRAWS_CACHE_RESOURCE } from '../officialDraw.js';
 import { readFixtures, readTournaments, rememberFixtures } from '../d1Store.js';
 
 // Two upstream calls, same as before. The first is a tournament-specific
@@ -128,6 +136,10 @@ export async function handleFixtures(request, env) {
     const cacheKey = ['fixtures5', tour, tournamentKey || 'all', dateStart || '', dateStop || ''];
     const query = { tour, tournamentKey, dateStart, dateStop };
 
+    // Repeat views within a minute skip KV. The body is the public merge only.
+    const edged = await readMergedEdge(query);
+    if (edged) return edged;
+
     let cached = null;
     try {
         cached = await cache.get(env, ...cacheKey);
@@ -136,10 +148,10 @@ export async function handleFixtures(request, env) {
     }
     if (cached && Array.isArray(cached.data)) {
         const live = cached.data.filter(row => row?.matchKey);
-        if (live.length) return live;
+        if (live.length) return deliverFixtures(env, query, live);
         // Short-TTL empty. Do not pay for another pull until it expires,
         // and do not hide D1 last-good behind that [].
-        if (cached.data.length === 0) return serveStoredFixtures(env, cacheKey, query);
+        if (cached.data.length === 0) return deliverFixtures(env, query, await serveStoredFixtures(env, cacheKey, query));
     }
 
     try {
@@ -151,13 +163,15 @@ export async function handleFixtures(request, env) {
             try {
                 await cache.set(env, TTL.fixturesEmpty, [], ...cacheKey, { skipStale: true });
             } catch { /* cache is fail-soft */ }
-            return serveStoredFixtures(env, cacheKey, query);
+            return deliverFixtures(env, query, await serveStoredFixtures(env, cacheKey, query));
         }
         try { await rememberFixtures(env, tour, live); } catch { /* last-good is best-effort */ }
+        // Store the schedule only. Status is overlaid on the way out so a
+        // 24h fixtures entry cannot freeze a live score or its statusAsOf.
         try { await cache.set(env, TTL.fixtures, live, ...cacheKey); } catch { /* cache is fail-soft */ }
-        return live;
+        return deliverFixtures(env, query, live);
     } catch {
-        return serveStoredFixtures(env, cacheKey, query);
+        return deliverFixtures(env, query, await serveStoredFixtures(env, cacheKey, query));
     }
 }
 
@@ -176,4 +190,225 @@ async function serveStoredFixtures(env, cacheKey, query) {
     } catch { /* KV miss is an empty board */ }
 
     return [];
+}
+
+const PROGRESSED = new Set(['Delayed', 'Live', 'Finished', 'Walkover', 'Cancelled']);
+const statusMemory = new Map();
+
+export function resetFixtureStatusMemoryForTests() {
+    statusMemory.clear();
+}
+
+function stickyId(tour, row) {
+    const matchKey = row?.matchKey == null || row.matchKey === '' ? '' : String(row.matchKey);
+    if (!matchKey) return '';
+    return `${tour}:${matchKey}:${fixtureCompositeKey(row)}`;
+}
+
+function priorStatuses(tour, rows) {
+    const out = [];
+    for (const row of rows || []) {
+        const saved = statusMemory.get(stickyId(tour, row));
+        if (saved) out.push(saved);
+    }
+    return out;
+}
+
+function rememberStatuses(tour, rows) {
+    for (const row of rows || []) {
+        const id = stickyId(tour, row);
+        if (!id) continue;
+        if (!PROGRESSED.has(row?.status)) {
+            statusMemory.delete(id);
+            continue;
+        }
+        const saved = {
+            matchKey: row.matchKey,
+            player1Key: row.player1Key,
+            player2Key: row.player2Key,
+            tournamentKey: row.tournamentKey,
+            roundId: row.roundId,
+            status: row.status,
+            isLive: row.status === 'Live',
+            setScores: Array.isArray(row.setScores) ? row.setScores.slice() : [],
+            winner: typeof row.winner === 'string' ? row.winner : '',
+            currentGame: row.currentGame ?? null,
+        };
+        withTrustedStart(saved, row.startsAtUtc);
+        tagWalkoverKind(saved, walkoverKindOf(row));
+        statusMemory.set(id, saved);
+    }
+}
+
+function envelopeTime(envelope) {
+    if (!envelope || typeof envelope !== 'object') return '';
+    for (const key of ['fetchedAt', 'cachedAt']) {
+        const value = envelope[key];
+        if (typeof value !== 'string' || !value) continue;
+        const ms = Date.parse(value);
+        if (!Number.isFinite(ms) || ms <= 0) continue;
+        return new Date(ms).toISOString();
+    }
+    return '';
+}
+
+function livescoreRows(envelope) {
+    const data = envelope?.data;
+    if (!Array.isArray(data)) return [];
+    return data.filter(row => row && typeof row === 'object');
+}
+
+function drawRows(envelope, tournamentKey) {
+    const rounds = envelope?.data?.rounds;
+    if (!Array.isArray(rounds)) return [];
+    const out = [];
+    for (const round of rounds) {
+        const matches = round?.matches;
+        if (!Array.isArray(matches)) continue;
+        for (const match of matches) {
+            if (!match || typeof match !== 'object' || match.synthetic) continue;
+            out.push(match.tournamentKey ? match : { ...match, tournamentKey });
+        }
+    }
+    return out;
+}
+
+export const MAX_FIXTURE_DRAW_READS = 5;
+export const FIXTURE_OVERLAY_EDGE_TTL = 60;
+
+function isTourRow(row) {
+    if (row?.tier === 'tour') return true;
+    if (row?.tier === 'challenger' || row?.tier === 'itf') return false;
+    return fixtureTier({
+        tournamentName: row?.tournamentName,
+        eventType: row?.eventType,
+    }) === 'tour';
+}
+
+// Requested tournamentKey first, then tour-tier events already on the page.
+// Hard stop at 5 so an unauthenticated fixtures view cannot fan out draws.
+function drawTournamentIds(query, rows) {
+    const ids = [];
+    const seen = new Set();
+    const add = (value) => {
+        if (value == null || value === '' || ids.length >= MAX_FIXTURE_DRAW_READS) return;
+        const id = String(value);
+        if (seen.has(id)) return;
+        seen.add(id);
+        ids.push(id);
+    };
+    add(query?.tournamentKey);
+    for (const row of rows || []) {
+        if (!isTourRow(row)) continue;
+        add(row.tournamentKey);
+    }
+    return ids;
+}
+
+function overlayEdgeParts(query) {
+    return [
+        'fixtures-overlay',
+        query.tour,
+        query.tournamentKey || 'all',
+        query.dateStart || '',
+        query.dateStop || '',
+    ];
+}
+
+async function readMergedEdge(query) {
+    try {
+        const hit = await cache.getEdge(...overlayEdgeParts(query));
+        const data = hit?.data;
+        if (Array.isArray(data)) return data;
+        if (data && Array.isArray(data.rows)) {
+            if (typeof data.asOf === 'string' && data.asOf) tagAsOf(data.rows, data.asOf);
+            return data.rows;
+        }
+    } catch { /* edge miss is not an error */ }
+    return null;
+}
+
+async function writeMergedEdge(query, rows, asOf) {
+    if (!Array.isArray(rows)) return;
+    // JSON clone drops symbols and anything that is not public data.
+    let value;
+    try {
+        value = JSON.parse(JSON.stringify(rows));
+    } catch {
+        return;
+    }
+    if (!Array.isArray(value)) return;
+    const stored = asOf ? { rows: value, asOf } : value;
+    try {
+        await cache.setEdge(FIXTURE_OVERLAY_EDGE_TTL, stored, ...overlayEdgeParts(query));
+    } catch { /* edge put is already fail-soft */ }
+}
+
+async function readCache(env, parts) {
+    try {
+        return await cache.get(env, ...parts);
+    } catch {
+        return null;
+    }
+}
+
+// Plain cache/KV reads. Never calls handleLivescore or any RapidAPI path,
+// so a cache miss cannot spend an upstream call.
+async function loadCachedOverlay(env, query, rows) {
+    const tour = query.tour;
+    const overlays = [];
+    let statusAsOf = '';
+    const take = (envelope, list) => {
+        if (!list.length) return;
+        overlays.push(...list);
+        const time = envelopeTime(envelope);
+        if (time > statusAsOf) statusAsOf = time;
+    };
+
+    const boards = [
+        ['livescore3', tour, 'all'],
+        ['livescore3', tour, 'all', 'last'],
+    ];
+    if (query.tournamentKey) {
+        const tid = String(query.tournamentKey);
+        boards.push(
+            ['livescore3', tour, tid],
+            ['livescore3', tour, tid, 'last'],
+        );
+    }
+    for (const parts of boards) {
+        const envelope = await readCache(env, parts);
+        take(envelope, livescoreRows(envelope));
+    }
+    for (const tid of drawTournamentIds(query, rows)) {
+        const envelope = await readCache(env, [DRAWS_CACHE_RESOURCE, tid, tour]);
+        take(envelope, drawRows(envelope, tid));
+    }
+    return { overlays, statusAsOf };
+}
+
+async function overlayFromCache(env, query, rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return Array.isArray(rows) ? rows : [];
+    const { overlays, statusAsOf } = await loadCachedOverlay(env, query, rows);
+    const hadCache = overlays.length > 0;
+    const prior = hadCache ? priorStatuses(query.tour, rows) : [];
+    const merged = applyFixtureOverlay(rows, prior.concat(overlays), {
+        now: new Date(),
+        statusAsOf: hadCache ? statusAsOf : '',
+    });
+    if (hadCache) rememberStatuses(query.tour, merged);
+    return merged;
+}
+
+async function deliverFixtures(env, query, rows) {
+    const asOf = readAsOf(rows);
+    let next = rows;
+    try {
+        next = await overlayFromCache(env, query, rows);
+    } catch {
+        next = Array.isArray(rows) ? applyFixtureOverlay(rows, [], { statusAsOf: '' }) : [];
+    }
+    if (asOf) tagAsOf(next, asOf);
+    await writeMergedEdge(query, next, asOf);
+    return next;
 }
