@@ -1,0 +1,15 @@
+{
+  "description": "Synthetic edge cases for ATP Finals round-robin Picks grading. Not real results. Rule: grade only from winner field; void if W/O, cancelled, or if the players at lock differ from the players who actually played (alternate swap).",
+  "cases": [
+    {"id":"rr-normal-correct","lockPlayers":["A","B"],"playedPlayers":["A","B"],"winner":"A","score":"6-4 7-5","status":"Finished","pick":"A","expected":1},
+    {"id":"rr-normal-wrong","lockPlayers":["A","B"],"playedPlayers":["A","B"],"winner":"A","score":"6-4 7-5","status":"Finished","pick":"B","expected":0},
+    {"id":"rr-retirement-counts","lockPlayers":["A","B"],"playedPlayers":["A","B"],"winner":"B","score":"3-6 2-1 RET","status":"Retired","pick":"B","expected":1},
+    {"id":"rr-walkover-void","lockPlayers":["A","B"],"playedPlayers":["A","B"],"winner":"A","score":"","status":"Walkover","pick":"A","expected":null},
+    {"id":"rr-alternate-swap-void","lockPlayers":["A","B"],"playedPlayers":["A","ALT"],"winner":"A","score":"6-3 6-2","status":"Finished","pick":"A","expected":null},
+    {"id":"rr-alternate-swap-void-loser-side","lockPlayers":["A","B"],"playedPlayers":["ALT","B"],"winner":"ALT","score":"6-3 6-2","status":"Finished","pick":"A","expected":null},
+    {"id":"rr-finished-no-winner-pending","lockPlayers":["A","B"],"playedPlayers":["A","B"],"winner":"","score":"6-4 6-4","status":"Finished","pick":"A","expected":"pending"},
+    {"id":"rr-cancelled-void","lockPlayers":["A","B"],"playedPlayers":["A","B"],"winner":"","score":"","status":"Cancelled","pick":"A","expected":null},
+    {"id":"rr-scoreless-winner-first-seen-pending","lockPlayers":["A","B"],"playedPlayers":["A","B"],"winner":"A","score":"","status":"Finished","seenScorelessCount":1,"pick":"A","expected":"pending"},
+    {"id":"rr-scoreless-winner-second-refresh-void","lockPlayers":["A","B"],"playedPlayers":["A","B"],"winner":"A","score":"","status":"Finished","seenScorelessCount":2,"pick":"A","expected":null}
+  ]
+}

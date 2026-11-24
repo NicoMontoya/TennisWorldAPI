@@ -54,13 +54,27 @@ export function parseTournamentKey(raw, { required = false } = {}) {
 // Cache API missing / match-put failure / corrupt counter → 429, never skip.
 // `env` is unused (call sites keep the same signature; no KV writes).
 
-export async function rateLimit(env, request, bucket, { max, windowSec } = RL_PER_MINUTE) {
-    const deny = () => httpError(429, 'Too many requests. Please try again shortly.');
+export async function rateLimit(env, request, bucket, options = RL_PER_MINUTE) {
+    const max = options?.max ?? RL_PER_MINUTE.max;
+    const windowSec = options?.windowSec ?? RL_PER_MINUTE.windowSec;
+    const deny = (retryAfterSec = windowSec) => {
+        const seconds = Math.max(1, Math.ceil(Number(retryAfterSec) || windowSec));
+        const message = typeof options?.message === 'function'
+            ? options.message(seconds)
+            : 'Too many requests. Please try again shortly.';
+        const err = Object.assign(new Error(message), { status: 429 });
+        if (options?.retryAfter) err.retryAfter = seconds;
+        throw err;
+    };
     try {
         const cache = typeof caches !== 'undefined' ? caches.default : null;
         if (!cache?.match || !cache?.put) deny();
 
-        const ip  = request.headers.get('CF-Connecting-IP') || 'local';
+        // Same Cache API window as the Scores limiter. `subject` keys a member
+        // instead of an IP so pick changes are 60/min/member.
+        const ip = options?.subject
+            ? String(options.subject)
+            : (request.headers.get('CF-Connecting-IP') || 'local');
         const key = new Request(rateLimitCacheUrl(bucket, ip));
         const now = Date.now();
 
@@ -91,7 +105,7 @@ export async function rateLimit(env, request, bucket, { max, windowSec } = RL_PE
             },
         }));
 
-        if (n > max) deny();
+        if (n > max) deny(ttl);
     } catch (err) {
         if (err.status === 429) throw err;
         deny();
