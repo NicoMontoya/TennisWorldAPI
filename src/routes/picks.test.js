@@ -310,12 +310,33 @@ describe('picks API', () => {
             .toBe(Date.parse('2026-11-16T00:00:00.000Z'));
     });
 
-    it('lockDecision uses the earliest of startsAtUtc, the order-of-play slot, and day start', async () => {
+    it('a timed match on its match day stays pickable until startsAtUtc', async () => {
+        const cookie = await member();
+        await seed(env, [fixture({
+            startsAtUtc: '2026-11-16T18:00:00.000Z',
+            time: '',
+            date: '2026-11-16',
+            timeZone: 'Europe/Rome',
+        })]);
+        now = Date.parse('2026-11-16T12:00:00.000Z');
+        const opened = await worker.fetch(call('/api/picks/open', { cookie }), env);
+        const card = (await opened.json()).data.matches[0];
+        expect(card.lockKind).toBe('start');
+        expect(card.locksAtUtc).toBe('2026-11-16T18:00:00.000Z');
+        expect((await postPick(cookie, { matchKey: 'm1', playerKey: '10' })).status).toBe(200);
+        now = Date.parse('2026-11-16T18:00:00.000Z');
+        const res = await postPick(cookie, { matchKey: 'm1', playerKey: '11' });
+        expect(res.status).toBe(409);
+        expect(env.DB._tables.picks[0].picked_player_key).toBe('10');
+        expect(env.DB._tables.picks[0].lock_at).toBe(Date.parse('2026-11-16T18:00:00.000Z'));
+    });
+
+    it('a slotted match locks at the order-of-play slot, earlier than startsAtUtc', async () => {
         const cookie = await member();
         await seed(env, [fixture({
             startsAtUtc: '2026-11-16T20:00:00.000Z',
             orderOfPlay: '2026-11-16T15:00:00.000Z',
-            date: '2026-11-17',
+            date: '2026-11-16',
             time: '',
             timeZone: 'Europe/Rome',
         })]);

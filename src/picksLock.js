@@ -1,8 +1,9 @@
 // Lock instant for a tour singles match. The client clock is never an input.
-// Status that has left Not Started locks immediately. Otherwise the lock is
-// the earliest instant among startsAtUtc, an order-of-play slot, and the
-// start of the match date (venue midnight, or UTC midnight, whichever is
-// earlier). No match date and no other instant: not pickable.
+// Status that has left Not Started locks immediately. A startsAtUtc and an
+// order-of-play slot lock at the earlier of those two. Day start (the earlier
+// of venue midnight and UTC midnight) is only the fallback when neither
+// exists, so it cannot pull a timed match earlier. No date and no clock:
+// not pickable.
 
 const LOCKING = new Set(['Live', 'Delayed', 'Finished', 'Walkover', 'Cancelled']);
 
@@ -124,7 +125,8 @@ export function lockDecision(row, now) {
     if (Number.isFinite(start)) options.push({ at: start, kind: 'start' });
     const slot = orderOfPlayUtc(row);
     if (slot != null) options.push({ at: slot, kind: 'slot' });
-    if (/^\d{4}-\d{2}-\d{2}$/.test(row?.date || '')) {
+    // Day start is not a candidate once a start time or a slot exists.
+    if (!options.length && /^\d{4}-\d{2}-\d{2}$/.test(row?.date || '')) {
         const at = earlierDayStartUtc(row.date, timeZoneOf(row));
         if (Number.isFinite(at)) options.push({ at, kind: 'day_start' });
     }
